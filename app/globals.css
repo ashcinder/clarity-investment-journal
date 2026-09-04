@@ -2496,3 +2496,30 @@ h1 > span {
 .account-detail-heading {
   display: none;
 }
+.reset-panel {
+  padding: 24px;
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-color: #eddcda;
+}
+.reset-panel h2 {
+  font-size: 17px;
+  color: #9e554c;
+}
+.reset-panel p {
+  color: #8a9293;
+  font-size: 12px;
+  margin-top: 8px;
+}
+.holding-table {
+  min-width: 950px;
+}
+@media (max-width: 650px) {
+  .reset-panel {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

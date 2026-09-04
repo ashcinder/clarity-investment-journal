@@ -31,7 +31,8 @@
     "coverage/**",
     "next-env.d.ts",
     "components/ui/**",
-    "hooks/**"
+    "hooks/**",
+    "standalone-dist/**"
   ],
   "rules": {
     "no-array-constructor": "error",

@@ -1,4 +1,4 @@
-'use client';
+"use client";
 import {
   Area,
   CartesianGrid,
@@ -9,8 +9,8 @@ import {
   Tooltip,
   PieChart,
   Pie,
-} from 'recharts';
-import { ChartContainer } from '@/components/ui/chart';
+} from "recharts";
+import { ChartContainer } from "@/components/ui/chart";
 import {
   categories,
   history,
@@ -19,26 +19,26 @@ import {
   convert,
   type Ledger,
   type Currency,
-} from '@/lib/ledger';
+} from "@/lib/ledger";
 export function TrendChart({
   state,
   currency,
   period,
-  mode = 'value',
+  mode = "value",
 }: {
   state: Ledger;
   currency: Currency;
-  period: number | 'all';
-  mode?: 'value' | 'profit';
+  period: number | "all";
+  mode?: "value" | "profit";
 }) {
   const data = history(state, currency, period);
-  const profit = mode === 'profit';
+  const profit = mode === "profit";
   return (
     <>
       <ChartContainer
         config={{
-          value: { label: '总资产', color: '#168778' },
-          net: { label: '净投入', color: '#b8c9ce' },
+          value: { label: "总资产", color: "#168778" },
+          net: { label: "净投入", color: "#b8c9ce" },
         }}
         className="trend-chart"
       >
@@ -64,44 +64,44 @@ export function TrendChart({
             tickLine={false}
             tickMargin={12}
             minTickGap={35}
-            tick={{ fontSize: 10, fill: '#93a1a6' }}
+            tick={{ fontSize: 10, fill: "#93a1a6" }}
           />
           <YAxis
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: '#93a1a6' }}
+            tick={{ fontSize: 10, fill: "#93a1a6" }}
             width={55}
             tickFormatter={(v) =>
-              `${currency === 'USD' ? '$' : '¥'}${Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + 'k' : v}`
+              `${currency === "USD" ? "$" : "¥"}${Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + "k" : v}`
             }
-            domain={['auto', 'auto']}
+            domain={["auto", "auto"]}
           />
           <Tooltip
-            labelFormatter={(_, items) => items[0]?.payload.date ?? ''}
+            labelFormatter={(_, items) => items[0]?.payload.date ?? ""}
             formatter={(v, name) => [
               money(Number(v), currency),
-              name === 'value'
-                ? '总资产'
-                : name === 'profit'
-                  ? '累计盈亏'
-                  : '净投入',
+              name === "value"
+                ? "总资产"
+                : name === "profit"
+                  ? "累计盈亏"
+                  : "净投入",
             ]}
             contentStyle={{
-              border: '1px solid #e0eae7',
+              border: "1px solid #e0eae7",
               borderRadius: 10,
               fontSize: 12,
-              boxShadow: '0 8px 25px #163c3410',
+              boxShadow: "0 8px 25px #163c3410",
             }}
           />
           <Area
-            dataKey={profit ? 'profit' : 'value'}
+            dataKey={profit ? "profit" : "value"}
             type="linear"
             stroke="#168778"
             strokeWidth={2.5}
             fill="url(#balance-fill)"
             dot={
               data.length < 3
-                ? { r: 5, fill: '#168778', stroke: '#fff', strokeWidth: 3 }
+                ? { r: 5, fill: "#168778", stroke: "#fff", strokeWidth: 3 }
                 : false
             }
             isAnimationActive={false}
@@ -121,8 +121,8 @@ export function TrendChart({
       </ChartContainer>
       <div className="chart-caption">
         {data.length === 1
-          ? '今天是第一笔记录。后续流水与估值会自然连成资产曲线。'
-          : '每日沿用最近一次已记录估值；历史汇率缺失时沿用最早参考值。'}
+          ? "今天是第一笔记录。后续流水与估值会自然连成资产曲线。"
+          : "每日沿用最近一次已记录估值；历史汇率缺失时沿用最早参考值。"}
       </div>
     </>
   );
@@ -139,7 +139,7 @@ export function AllocationChart({
     ...info,
     fill: info.color,
     name: info.label,
-    value: p.assets
+    value: p.categoryAssets
       .filter((a) => a.category === key)
       .reduce(
         (sum, a) => sum + convert(a.value, a.currency, currency, p.fx),
@@ -150,7 +150,7 @@ export function AllocationChart({
     <>
       <div className="donut-wrap">
         <ChartContainer
-          config={{ value: { label: '资产占比' } }}
+          config={{ value: { label: "资产占比" } }}
           className="donut-chart"
         >
           <PieChart accessibilityLayer>
@@ -160,10 +160,10 @@ export function AllocationChart({
                   ? data.filter((x) => x.value > 0)
                   : [
                       {
-                        name: '暂无资产',
+                        name: "暂无资产",
                         value: 1,
-                        color: '#edf2f4',
-                        fill: '#edf2f4',
+                        color: "#edf2f4",
+                        fill: "#edf2f4",
                       },
                     ]
               }
@@ -183,7 +183,7 @@ export function AllocationChart({
                 formatter={(v) => money(Number(v), currency)}
                 contentStyle={{
                   borderRadius: 10,
-                  border: '1px solid #e0eae7',
+                  border: "1px solid #e0eae7",
                   fontSize: 11,
                 }}
               />
@@ -204,7 +204,7 @@ export function AllocationChart({
             <span className="dot" style={{ background: d.color }} />
             <span>{d.name}</span>
             <strong>
-              {p.value > 0 ? ((d.value / p.value) * 100).toFixed(1) : '0.0'}%
+              {p.value > 0 ? ((d.value / p.value) * 100).toFixed(1) : "0.0"}%
             </strong>
           </div>
         ))}

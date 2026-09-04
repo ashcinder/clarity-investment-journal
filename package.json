@@ -14,7 +14,12 @@
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
-    "db:local": "wrangler d1 migrations apply site-creator-d1 --local --config wrangler.local.json"
+    "db:local": "wrangler d1 migrations apply site-creator-d1 --local --config wrangler.local.json",
+    "local": "node scripts/local.mjs",
+    "local:build": "vite build --config standalone/vite.config.ts",
+    "local:start": "node standalone/server.mjs",
+    "local:dev": "node scripts/local.mjs --dev",
+    "test:standalone": "node tests/standalone.test.mjs"
   },
   "dependencies": {
     "react": "19.2.6",

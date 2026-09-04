@@ -12,6 +12,9 @@ export type Account = {
   note: string;
 };
 export type Holding = {
+  assetType?: Category;
+  side?: "long" | "short" | "neutral";
+  leverage?: number;
   id: string;
   accountId: string;
   symbol: string;
@@ -31,6 +34,10 @@ export type Entry = {
   automatic?: boolean;
   reportedRoi?: number;
   principalAdjustment?: number;
+  quantitySet?: number;
+  quantityDelta?: number;
+  unitPrice?: number;
+  unitCost?: number;
   planKey?: string;
   transferId?: string;
 };
@@ -560,6 +567,28 @@ export function portfolio(
     profit,
     roi: invested > 0 ? (profit / invested) * 100 : null,
     assets,
+    categoryAssets: assets.flatMap((a) => {
+      const positions = (state.holdings ?? [])
+        .filter((h) => h.accountId === a.id)
+        .map((h) => ({
+          ...holdingStats(state, h, end),
+          id: h.id,
+          accountId: a.id,
+          category: assetType(state, h),
+          currency: a.currency,
+        }));
+      return [
+        ...positions,
+        {
+          id: a.id,
+          accountId: a.id,
+          category: a.category,
+          currency: a.currency,
+          value: a.value - positions.reduce((n, h) => n + h.value, 0),
+          profit: a.profit - positions.reduce((n, h) => n + h.profit, 0),
+        },
+      ];
+    }),
     fx,
   };
 }
@@ -791,6 +820,12 @@ export function validateLedger(input: unknown): Ledger {
         typeof h.archived === "boolean",
       "标的信息无效",
     );
+    if (h.assetType !== undefined)
+      assert(Object.hasOwn(categories, h.assetType), "资产类型无效");
+    if (h.side !== undefined)
+      assert(["long", "short", "neutral"].includes(h.side), "仓位方向无效");
+    if (h.leverage !== undefined)
+      assert(num(h.leverage, 1, 1000), "杠杆倍数无效");
     holdingIds.add(h.id);
   }
   const entryIds = new Set<string>(),
@@ -829,6 +864,17 @@ export function validateLedger(input: unknown): Ledger {
             e.accountId,
         "标的必须属于所选账户",
       );
+    for (const key of [
+      "quantitySet",
+      "quantityDelta",
+      "unitPrice",
+      "unitCost",
+    ] as const)
+      if (e[key] !== undefined)
+        assert(
+          num(e[key]) && !!e.holdingId,
+          "资产数量与价格必须是非负数且归属资产",
+        );
     if (e.principalAdjustment !== undefined)
       assert(
         num(e.principalAdjustment, -1e12, 1e12) &&
@@ -917,13 +963,12 @@ export function validateLedger(input: unknown): Ledger {
         "定投标的必须属于所选账户",
       );
     const a = s.accounts.find((a) => a.id === p.accountId)!;
+    const assetType =
+      (s.holdings ?? []).find((h) => h.id === p.holdingId)?.assetType ??
+      a.category;
     assert(
       p.market ===
-        (a.category === "fund"
-          ? "CN"
-          : a.category === "stock"
-            ? "US"
-            : "CRYPTO"),
+        (assetType === "fund" ? "CN" : assetType === "stock" ? "US" : "CRYPTO"),
       "市场必须与账户资产类型一致",
     );
     assert(
@@ -1093,4 +1138,91 @@ export function planAccountAmount(
       fxAt(state, date).rate,
     ),
   );
+}
+
+export function assetType(state: Ledger, h: Holding): Category {
+  return (
+    h.assetType ?? state.accounts.find((a) => a.id === h.accountId)!.category
+  );
+}
+export function positionStats(state: Ledger, h: Holding, end = today()) {
+  let quantity: number | null = null,
+    unitPrice: number | null = null,
+    unitCost: number | null = null;
+  for (const e of sortedEntries(
+    state.entries.filter((e) => e.holdingId === h.id && e.date <= end),
+  )) {
+    if (e.quantitySet !== undefined) quantity = e.quantitySet;
+    if (e.quantityDelta !== undefined)
+      quantity = (quantity ?? 0) + e.quantityDelta;
+    if (e.unitPrice !== undefined) unitPrice = e.unitPrice;
+    if (e.unitCost !== undefined) unitCost = e.unitCost;
+  }
+  const stats = holdingStats(state, h, end);
+  return {
+    ...stats,
+    quantity,
+    unitPrice,
+    unitCost: quantity && quantity > 0 ? stats.invested / quantity : unitCost,
+  };
+}
+export type PositionInput = {
+  quantity: number;
+  unitCost: number;
+  unitPrice: number;
+  margin: number;
+  equity: number;
+};
+export function recordPosition(
+  state: Ledger,
+  h: Holding,
+  input: PositionInput,
+  date = today(),
+): Entry {
+  for (const value of Object.values(input))
+    if (!Number.isFinite(value) || value < 0 || value > 1e12)
+      throw Error("资产数量、价格和权益必须是有效非负数");
+  const grid = assetType(state, h) === "grid";
+  const principal = grid
+    ? input.margin
+    : round(input.quantity * input.unitCost);
+  const value = grid ? input.equity : round(input.quantity * input.unitPrice);
+  if (principal > 1e12 || value > 1e12) throw Error("持仓金额超过上限");
+  const stats = holdingStats(state, h, date);
+  return {
+    id: uid(),
+    accountId: h.accountId,
+    holdingId: h.id,
+    kind: "valuation",
+    amount: value,
+    principalAdjustment: round(principal - stats.invested),
+    quantitySet: input.quantity,
+    unitCost: input.unitCost,
+    unitPrice: input.unitPrice,
+    date,
+    fx: fxAt(state, date).rate,
+    note: grid ? "更新网格仓位、保证金与权益" : "更新资产数量、成本和价格",
+    createdAt: new Date(
+      Math.max(
+        Date.now(),
+        ...state.entries
+          .filter((e) => e.date === date)
+          .map((e) => Date.parse(e.createdAt) + 1),
+      ),
+    ).toISOString(),
+  };
+}
+export function clearLedger(state: Ledger, keepAccounts: boolean): Ledger {
+  return {
+    ...structuredClone(state),
+    accounts: keepAccounts ? structuredClone(state.accounts) : [],
+    holdings: [],
+    entries: [],
+    plans: [],
+    journals: [],
+    skipped: [],
+  };
+}
+export function emptyLedger(): Ledger {
+  return clearLedger(seedLedger(), false);
 }
