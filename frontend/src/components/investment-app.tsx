@@ -2864,8 +2864,24 @@ function AccountForm({
   const [image, setImage] = useState(account?.image);
   const [imageBusy, setImageBusy] = useState(false);
   const [imageError, setImageError] = useState("");
+  const [imageDragOver, setImageDragOver] = useState(false);
+  const imageDragDepth = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const imageJob = useRef(false);
+  async function selectImage(file: File) {
+    if (busy || imageJob.current) return;
+    imageJob.current = true;
+    setImageBusy(true);
+    setImageError("");
+    try {
+      setImage(await prepareAccountImage(file));
+    } catch (error) {
+      setImageError(errorText(error));
+    } finally {
+      imageJob.current = false;
+      setImageBusy(false);
+    }
+  }
   const hasHistory =
     !!account &&
     (state.entries.some((e) => e.accountId === account.id) ||
@@ -2915,14 +2931,44 @@ function AccountForm({
         </div>
       }
     >
-      <div className="account-image-editor field-wide">
+      <div
+        className={`account-image-editor field-wide${imageDragOver ? " is-drag-over" : ""}`}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          if (busy || imageJob.current || !event.dataTransfer.types.includes("Files")) return;
+          imageDragDepth.current += 1;
+          setImageDragOver(true);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = busy || imageJob.current ? "none" : "copy";
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          imageDragDepth.current = Math.max(0, imageDragDepth.current - 1);
+          if (imageDragDepth.current === 0) setImageDragOver(false);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          imageDragDepth.current = 0;
+          setImageDragOver(false);
+          if (busy || imageJob.current) return;
+          const files = event.dataTransfer.files;
+          if (files.length !== 1) {
+            setImageError(files.length > 1 ? "每次请拖入一张图片。" : "请拖入电脑中的 PNG、JPG 或 WebP 图片文件。");
+            return;
+          }
+          void selectImage(files[0]);
+        }}
+      >
         <div className="account-image-preview">
           <AccountIcon account={{ category, image }} />
         </div>
         <div className="account-image-controls">
-          <strong>账户图片</strong>
+          <strong>{imageDragOver ? "松开即可上传图片" : "账户图片"}</strong>
           <p id="account-image-hint">
-            PNG、JPG 或 WebP，最大 5 MB。完整保留图片内容，自动缩小。
+            拖动图片到此处，或点击上传。支持 PNG、JPG、WebP，最大 5 MB。
           </p>
           <input
             ref={fileInput}
@@ -2932,21 +2978,10 @@ function AccountForm({
             aria-describedby="account-image-hint"
             hidden
             disabled={busy || imageBusy}
-            onChange={async (event) => {
+            onChange={(event) => {
               const file = event.target.files?.[0];
               event.target.value = "";
-              if (!file || imageJob.current) return;
-              imageJob.current = true;
-              setImageBusy(true);
-              setImageError("");
-              try {
-                setImage(await prepareAccountImage(file));
-              } catch (error) {
-                setImageError(errorText(error));
-              } finally {
-                imageJob.current = false;
-                setImageBusy(false);
-              }
+              if (file) void selectImage(file);
             }}
           />
           <div className="row account-image-actions">

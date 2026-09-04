@@ -2546,6 +2546,12 @@ h1 > span {
   border-radius: 18px;
   font-size: 32px;
 }
+.account-image-editor.is-drag-over {
+  border-color: #278a75;
+  border-style: dashed;
+  background: #eaf5ef;
+  box-shadow: 0 0 0 3px #278a7514;
+}
 .account-image-controls {
   min-width: 0;
 }
