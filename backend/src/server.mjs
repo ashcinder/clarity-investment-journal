@@ -1,7 +1,7 @@
 import http from "node:http";
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync, existsSync, readFileSync, statSync } from "node:fs";
-import { resolve, dirname, extname, sep } from "node:path";
+import { mkdirSync } from "node:fs";
+import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   emptyLedger,
@@ -9,14 +9,14 @@ import {
   clearLedger,
   validDate,
   today,
-} from "../lib/ledger.ts";
-import { materializeAutomatic } from "../lib/automation.ts";
+} from "../../shared/ledger.ts";
+import { materializeAutomatic } from "./automation.ts";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const port = Number(process.env.CLARITY_PORT || 4318);
 if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw Error("CLARITY_PORT 无效");
 const dbPath = resolve(
-  process.env.CLARITY_DB_PATH || resolve(root, ".data/clarity.sqlite"),
+  process.env.CLARITY_DB_PATH || resolve(root, "data/clarity.sqlite"),
 );
 mkdirSync(dirname(dbPath), { recursive: true });
 const db = new DatabaseSync(dbPath);
@@ -71,16 +71,6 @@ async function bodyOf(req) {
   }
   return JSON.parse(raw);
 }
-const staticRoot = resolve(root, "standalone-dist");
-const mime = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".ico": "image/x-icon",
-  ".woff2": "font/woff2",
-};
 const server = http.createServer(async (req, res) => {
   try {
     if (
@@ -93,8 +83,9 @@ const server = http.createServer(async (req, res) => {
       "http://127.0.0.1:" + port,
       "http://localhost:" + port,
     ];
-    if (process.env.CLARITY_DEV === "1")
-      allowedOrigins.push("http://127.0.0.1:5173");
+    allowedOrigins.push(
+      process.env.CLARITY_FRONTEND_ORIGIN || "http://127.0.0.1:5173",
+    );
     if (req.headers.origin && !allowedOrigins.includes(req.headers.origin)) {
       json(res, 403, { error: "请求来源无效" });
       return;
@@ -171,31 +162,15 @@ const server = http.createServer(async (req, res) => {
       json(res, 404, { error: "接口不存在" });
       return;
     }
-    if (!["GET", "HEAD"].includes(req.method)) {
-      json(res, 405, { error: "不支持此操作" });
-      return;
-    }
-    let file = resolve(staticRoot, "." + decodeURIComponent(url.pathname));
-    if (file !== staticRoot && !file.startsWith(staticRoot + sep)) {
-      json(res, 403, { error: "路径无效" });
-      return;
-    }
-    if (!existsSync(file) || !statSync(file).isFile())
-      file = resolve(staticRoot, "index.html");
-    if (!existsSync(file)) {
-      json(res, 503, {
-        error:
-          "请先运行 npm run local:build，或使用开发前端 http://127.0.0.1:5173",
+    if (url.pathname === "/") {
+      json(res, 200, {
+        service: "澄明 API",
+        frontend:
+          process.env.CLARITY_FRONTEND_ORIGIN || "http://127.0.0.1:5173",
       });
       return;
     }
-    res.writeHead(200, {
-      "Content-Type": mime[extname(file)] || "application/octet-stream",
-      "X-Content-Type-Options": "nosniff",
-      "Cache-Control":
-        extname(file) === ".html" ? "no-cache" : "public, max-age=3600",
-    });
-    res.end(req.method === "HEAD" ? undefined : readFileSync(file));
+    json(res, 404, { error: "这里只提供后端 API，请打开前端页面" });
   } catch (error) {
     json(res, 400, { error: error.message || "操作失败" });
   }
@@ -210,7 +185,7 @@ const timer = setInterval(() => {
 timer.unref();
 server.listen(port, "127.0.0.1", () => {
   console.log(
-    `澄明已启动：http://127.0.0.1:${port}\nSQLite 数据库：${dbPath}\n按 Ctrl+C 停止。重启后数据保留。`,
+    `澄明后端已启动：http://127.0.0.1:${port}\nSQLite 数据库：${dbPath}\n按 Ctrl+C 停止。重启后数据保留。`,
   );
 });
 server.on("error", (error) => {

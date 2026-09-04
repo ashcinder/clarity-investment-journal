@@ -13,7 +13,7 @@ import {
   validateLedger,
   fxAt,
   validDate,
-} from '../lib/ledger.ts';
+} from '../shared/ledger.ts';
 const date = '2026-09-04';
 let id = 0;
 function entry(s, kind, amount, accountId = 'spot-a', extra = {}) {

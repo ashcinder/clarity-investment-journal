@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import './globals.css';
+import '../frontend/src/styles/globals.css';
 export const metadata: Metadata = {
   metadataBase: new URL(
     'https://clarity-investment-journal.yvonnejenning294160.chatgpt.site',

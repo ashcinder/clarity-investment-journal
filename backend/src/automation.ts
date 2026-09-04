@@ -10,7 +10,7 @@ import {
   money,
   positionStats,
   assetType,
-} from "./ledger.ts";
+} from "../../shared/ledger.ts";
 export function upgradeLedger(input: Ledger, now = new Date()): Ledger {
   const state = structuredClone(input);
   state.holdings ??= [];

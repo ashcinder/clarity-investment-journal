@@ -14,12 +14,12 @@ import {
   validateLedger,
   scheduledDates,
   planAccountAmount,
-} from "../lib/ledger.ts";
+} from "../shared/ledger.ts";
 import {
   materializeAutomatic,
   upgradeLedger,
   scheduledInstant,
-} from "../lib/automation.ts";
+} from "../backend/src/automation.ts";
 const date = "2026-09-04";
 function fixture() {
   const s = seedLedger(date);

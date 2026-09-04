@@ -4,17 +4,20 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { recordPosition, today } from "../lib/ledger.ts";
-test("standalone frontend/API/SQLite persist assets across restart and support safe reset", async () => {
+import { recordPosition, today } from "../shared/ledger.ts";
+test("separate frontend and backend proxy API, persist SQLite and support safe reset", async () => {
   const dir = await mkdtemp(join(tmpdir(), "clarity-test-"));
   const origin = "http://127.0.0.1:44318";
   let child;
+  let frontend;
+  const frontendOrigin = "http://127.0.0.1:44319";
   let output = "";
   const start = async () => {
-    child = spawn(process.execPath, ["standalone/server.mjs"], {
+    child = spawn(process.execPath, ["backend/src/server.mjs"], {
       env: {
         ...process.env,
         CLARITY_PORT: "44318",
+        CLARITY_FRONTEND_ORIGIN: frontendOrigin,
         CLARITY_DB_PATH: join(dir, "test.sqlite"),
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -23,7 +26,7 @@ test("standalone frontend/API/SQLite persist assets across restart and support s
     child.stderr.on("data", (x) => (output += x));
     for (let i = 0; i < 60; i++) {
       if (child.exitCode !== null) throw Error(output);
-      if (output.includes("澄明已启动")) return;
+      if (output.includes("澄明后端已启动")) return;
       await new Promise((r) => setTimeout(r, 50));
     }
     throw Error("Server did not start: " + output);
@@ -43,6 +46,32 @@ test("standalone frontend/API/SQLite persist assets across restart and support s
     });
   try {
     await start();
+    frontend = spawn(
+      process.execPath,
+      [
+        "node_modules/vite/bin/vite.js",
+        "preview",
+        "--config",
+        "frontend/vite.config.ts",
+        "--port",
+        "44319",
+      ],
+      {
+        env: { ...process.env, CLARITY_PORT: "44318" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let frontOutput = "";
+    frontend.stdout.on("data", (x) => (frontOutput += x));
+    frontend.stderr.on("data", (x) => (frontOutput += x));
+    for (let i = 0; i < 80 && !frontOutput.includes("Local:"); i++) {
+      if (frontend.exitCode !== null) throw Error(frontOutput);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const page = await fetch(frontendOrigin);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /<div id="root">/);
+    assert.equal((await fetch(frontendOrigin + "/api/health")).status, 200);
     assert.equal((await fetch(origin + "/")).status, 200);
     assert.equal((await fetch(origin + "/api/health")).status, 200);
     let d = await get();
@@ -79,7 +108,11 @@ test("standalone frontend/API/SQLite persist assets across restart and support s
         today(),
       ),
     );
-    let res = await send("/api/ledger", "PUT", d);
+    let res = await fetch(frontendOrigin + "/api/ledger", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Origin: frontendOrigin },
+      body: JSON.stringify(d),
+    });
     assert.equal(res.status, 200);
     d = await res.json();
     assert.equal(d.state.entries[0].amount, 1300);
@@ -131,6 +164,11 @@ test("standalone frontend/API/SQLite persist assets across restart and support s
     assert.equal(res.status, 200);
     assert.equal((await get()).state.accounts.length, 0);
   } finally {
+    if (frontend && frontend.exitCode === null)
+      await new Promise((r) => {
+        frontend.once("exit", r);
+        frontend.kill("SIGTERM");
+      });
     if (child && child.exitCode === null) await stop();
     await rm(dir, { recursive: true, force: true });
   }

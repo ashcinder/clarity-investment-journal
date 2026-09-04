@@ -30,9 +30,10 @@
     "dist/**",
     "coverage/**",
     "next-env.d.ts",
-    "components/ui/**",
-    "hooks/**",
-    "standalone-dist/**"
+    "frontend/src/components/ui/**",
+    "frontend/src/hooks/**",
+    "standalone-dist/**",
+    "frontend/dist/**"
   ],
   "rules": {
     "no-array-constructor": "error",

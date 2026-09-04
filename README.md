@@ -2,30 +2,70 @@
 
 React + TypeScript 前端，Node.js + SQLite 独立后端；同时保留已发布网站使用的 Cloudflare D1 后端。两种运行方式共享资产计算、交易日历、定投和数据校验逻辑。数据真正保存在数据库中，不依赖浏览器缓存。
 
-## 最快运行完整前后端
+## 目录与最快运行
 
-需要 **Node.js 22.18+**（建议 24 或更新版本），首次安装依赖需要联网。在项目根目录执行：
+项目位于 `/Users/tangyucinder/开发/现代化理财`，采用 npm workspaces，前后端各有自己的 `package.json`、启动命令和配置：
+
+```text
+现代化理财/
+├── frontend/             React + Vite 前端
+│   ├── src/components/   页面和 UI 组件
+│   ├── src/styles/       样式
+│   ├── public/           图片和图标
+│   ├── dist/             前端构建产物
+│   └── package.json
+├── backend/              Node.js + SQLite 后端
+│   ├── src/server.mjs    HTTP API 入口
+│   ├── src/automation.ts 自动定投
+│   ├── data/             持久化 SQLite 数据库
+│   ├── cloud/            线上 D1 / Sites 后端适配
+│   └── package.json
+├── shared/               共用的数据类型、计算和校验
+├── app/                  线上框架所需的薄路由入口
+├── scripts/              一键启动
+└── package.json          工作区与统一命令
+```
+
+需要 **Node.js 22.18+**（建议 24 或更新版本）。首次在项目根目录安装依赖：
 
 ```bash
+cd /Users/tangyucinder/开发/现代化理财
 npm ci
-npm run local
+npm run dev
 ```
 
-打开 **http://127.0.0.1:4318/**。这一条启动命令会构建前端、创建 SQLite 数据库并启动后端，由后端同时提供网页和 API。无需 Cloudflare 账户、ChatGPT 登录、API Key 或手动建表。
+这会同时启动两个独立进程：
 
-macOS 也可双击项目内的 **启动理财账本.command**。它会在首次运行时安装依赖并启动应用。
+- **前端页面：http://127.0.0.1:5173/**
+- **后端 API：http://127.0.0.1:4318/api/health**
 
-本地版首次打开是空账本，不预置测试资产。先新增账户，再进入账户添加真实资产。按 `Ctrl+C` 停止，重启后数据保留。已经构建过前端且源代码没有修改时，可用 `npm run local:start` 快速重启。
+前端将 `/api/*` 代理给后端，后端不托管网页。原来的 `4318` 现在是纯 API 地址，使用网页请打开 `5173`。
 
-默认端口被占用时：
+也可分别启动，在两个终端执行：
 
 ```bash
-CLARITY_PORT=4321 npm run local
+# 终端一
+cd /Users/tangyucinder/开发/现代化理财/backend
+npm run dev
 ```
 
-本地数据位于 `.data/clarity.sqlite`，运行期间可能有 SQLite 的 `-wal` 和 `-shm` 文件。推荐在网页“偏好设置”下载 JSON 备份；若直接复制数据库文件，请先停止服务。可用 `CLARITY_DB_PATH=/绝对路径/clarity.sqlite` 指定数据位置。
+```bash
+# 终端二
+cd /Users/tangyucinder/开发/现代化理财/frontend
+npm run dev
+```
 
-本地服务只监听 `127.0.0.1`，是单用户个人版。线上版使用 Sites 登录隔离不同用户的数据。本地和线上数据库相互独立，可通过设置页 JSON 导出/导入迁移，不会自动互相覆盖。
+构建后运行：根目录执行 `npm run local` 会构建前端并同时启动前端预览和后端；已有构建时执行 `npm start`。也可分别在 `frontend/` 执行 `npm run build && npm start`，在 `backend/` 执行 `npm start`。
+
+macOS 可双击 **启动理财账本.command**。按 `Ctrl+C` 停止。`npm run local:dev`、`npm run local:build`、`npm run local:start` 保留为兼容命令。
+
+本地服务无需 Cloudflare 账户、ChatGPT 登录、API Key 或手动建表。首次本地账本为空，先创建账户再添加资产。
+
+数据库位于 **`backend/data/clarity.sqlite`**。原 `.data/` 已原样迁移，数据内容不变。运行期间可能有 `-wal` 和 `-shm` 文件；建议通过界面导出 JSON，复制数据库文件前应停止后端。
+
+可在根目录启动时设置 `CLARITY_PORT`（后端）、`CLARITY_FRONTEND_PORT`（前端）和 `CLARITY_DB_PATH`（数据库绝对路径）。单独启动前端时，`CLARITY_API_URL` 可指定后端地址；自定义前端端口时，还需给后端设置 `CLARITY_FRONTEND_ORIGIN`。更多说明见 `frontend/README.md` 和 `backend/README.md`。
+
+前后端默认只监听本机，用于单用户个人账本。线上使用 Sites 登录与 D1；本地和线上数据独立，可通过 JSON 导入/导出迁移。
 
 ## 账户里面直接是资产
 
@@ -63,22 +103,9 @@ CLARITY_PORT=4321 npm run local
 
 本地后端运行期间每分钟处理到期计划，浏览器关闭也可记账；后端停止期间下次启动或访问时补齐。线上版打开/同步时补齐。重复访问不会重复入账，删除一笔自动流水会将该期标记为跳过。
 
-## 前后端目录
+## 后端 API
 
-```text
-components/investment-app.tsx     React 页面、账户、资产、计划及清空表单
-components/portfolio-charts.tsx   资产曲线、配置图
-app/globals.css                  界面样式
-standalone/web/                  独立前端入口
-standalone/vite.config.ts        独立前端构建和开发代理
-standalone/server.mjs            Node.js HTTP API、SQLite、定投计时器
-lib/ledger.ts                    资产、数量、成本、收益、汇率、日历和校验
-lib/automation.ts                北京时间定投与幂等补记
-app/api/                        线上 D1 API（含清空接口）
-db/、drizzle/                    线上数据库结构及迁移
-scripts/local.mjs                一键构建并启动前后端
-.data/                          本地数据库（不提交、不打包）
-```
+所有业务 API 在 `backend/` 中；根目录 `app/api/` 只将线上请求转发到 `backend/cloud/routes/`。前端不会导入数据库或后端服务代码。`shared/ledger.ts` 为前后端共用的纯计算模块。
 
 独立后端 API：
 
@@ -94,32 +121,32 @@ scripts/local.mjs                一键构建并启动前后端
 
 ## 开发与验证
 
-前端热更新 + 本地 Node 后端：
+前后端独立热更新：
 
 ```bash
 npm run local:dev
 ```
 
-前端 http://127.0.0.1:5173，后端 http://127.0.0.1:4318；前端修改自动刷新，后端代码修改后重启命令。
+前端 http://127.0.0.1:5173，后端 http://127.0.0.1:4318；前端修改自动刷新，后端通过 Node watch 自动重启。
 
 ```bash
 npm run local:build
 npm test
 npm run lint
 npm run typecheck
-npm run build
+npm run build:site
 ```
 
-领域和独立后端测试共 45 项，覆盖持仓数量、市值、网格权益、多资产分类、收益、汇率、交易日历、自动定投、跨日、持久化重启、版本冲突与两种清空模式。独立后端测试使用临时数据库及端口 44318，不接触个人账本；前端静态服务测试需要先执行 `npm run local:build`。
+领域和独立后端测试共 45 项，覆盖持仓数量、市值、网格权益、多资产分类、收益、汇率、交易日历、自动定投、跨日、持久化重启、版本冲突与两种清空模式。分离架构测试使用临时数据库、后端端口 44318 和前端端口 44319，不接触个人账本；测试前先执行 `npm run build`。它会验证前端页面、API 代理读写、后端重启和清空。
 
 线上架构本地开发（可选，日常使用独立版无需执行）：
 
 ```bash
 npm run db:local
-npm run dev -- --hostname 127.0.0.1
+npm run dev:site -- --hostname 127.0.0.1
 ```
 
-使用控制台输出地址和本地测试登录。线上构建为 `npm run build`，发布由 Sites 管理 D1、身份验证和访问权限。
+使用控制台输出地址和本地测试登录。线上构建为 `npm run build:site`，发布由 Sites 管理 D1、身份验证和访问权限。
 
 ## 数据口径和边界
 

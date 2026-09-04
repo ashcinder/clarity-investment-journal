@@ -10,8 +10,8 @@ import {
   validateLedger,
   deleteHolding,
   today,
-} from "../lib/ledger.ts";
-import { materializeAutomatic } from "../lib/automation.ts";
+} from "../shared/ledger.ts";
+import { materializeAutomatic } from "../backend/src/automation.ts";
 const date = today();
 const input = (quantity, unitCost, unitPrice) => ({
   quantity,

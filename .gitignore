@@ -42,3 +42,9 @@ next-env.d.ts
 
 /.data/
 /standalone-dist/
+
+/frontend/dist/
+/backend/data/
+/frontend/node_modules/
+/backend/node_modules/
+/shared/node_modules/

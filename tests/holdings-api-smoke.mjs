@@ -2,7 +2,7 @@ import {
   updateHoldingAmounts,
   holdingStats,
   deleteHolding,
-} from "../lib/ledger.ts";
+} from "../shared/ledger.ts";
 import assert from "node:assert/strict";
 const origin = process.env.CLARITY_TEST_ORIGIN || "http://127.0.0.1:3001";
 assert.equal(new URL(origin).hostname, "127.0.0.1");
