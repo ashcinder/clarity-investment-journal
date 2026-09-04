@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 export const metadata: Metadata = {
   metadataBase: new URL(
-    'https://clarity-investment-journal.shady-crumb-2665.chatgpt.site',
+    'https://clarity-investment-journal.yvonnejenning294160.chatgpt.site',
   ),
   icons: { icon: '/icon.svg' },
   title: '澄明 · 投资手账',
@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   openGraph: {
     images: [
       {
-        url: 'https://clarity-investment-journal.shady-crumb-2665.chatgpt.site/og.png',
+        url: 'https://clarity-investment-journal.yvonnejenning294160.chatgpt.site/og.png',
         width: 1200,
         height: 630,
         alt: '澄明 · 投资手账',
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     images: [
-      'https://clarity-investment-journal.shady-crumb-2665.chatgpt.site/og.png',
+      'https://clarity-investment-journal.yvonnejenning294160.chatgpt.site/og.png',
     ],
     card: 'summary_large_image',
     title: '澄明 · 投资手账',
