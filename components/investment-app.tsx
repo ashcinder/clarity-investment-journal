@@ -72,6 +72,8 @@ import {
   range,
   accountStats,
   holdingStats,
+  updateHoldingAmounts,
+  deleteHolding,
   unallocated,
   allocateHolding,
   roiValuation,
@@ -233,6 +235,7 @@ export default function InvestmentApp() {
   const [currency, setCurrency] = useState<Currency>("USD");
   const [period, setPeriod] = useState<number | "all">(30);
   const [mobile, setMobile] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [category, setCategory] = useState("all");
   const [search, setSearch] = useState("");
   const [recordFilter, setRecordFilter] = useState("all");
@@ -250,6 +253,7 @@ export default function InvestmentApp() {
   }, [notice]);
   function navigate(next: Tab) {
     setTab(next);
+    setDetailId(null);
     setMobile(false);
     window.history.replaceState(null, "", "#" + next);
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -451,6 +455,7 @@ export default function InvestmentApp() {
     const b = monthBounds(month);
     return s ? occurrences(s, b.from, b.to) : [];
   }, [s, month]);
+  const detailAccount = s?.accounts.find((a) => a.id === detailId);
   const activeAccounts = s?.accounts.filter((a) => !a.archived) ?? [];
   const filteredEntries = useMemo(
     () =>
@@ -649,7 +654,14 @@ export default function InvestmentApp() {
         </header>
         {!s || !totals || !usd || !cny ? (
           <div className="page">
-            <div className="page-heading">
+            <div
+              className={
+                "page-heading" +
+                (tab === "accounts" && detailAccount
+                  ? " account-detail-heading"
+                  : "")
+              }
+            >
               <div>
                 <div className="eyebrow">YOUR MONEY, IN PERSPECTIVE</div>
                 <h1>每一笔投入，都有回响。</h1>
@@ -1054,7 +1066,7 @@ export default function InvestmentApp() {
                 </div>
               </>
             )}
-            {tab === "accounts" && (
+            {tab === "accounts" && !detailAccount && (
               <>
                 <div className="toolbar">
                   <div className="filter-tabs">
@@ -1152,87 +1164,26 @@ export default function InvestmentApp() {
                               : "尚未更新估值 · 按流水金额计"}
                           </div>
                           {a.note && <p className="account-note">{a.note}</p>}
-                          <div className="holdings-section">
-                            <div className="row">
-                              <strong>账户标的</strong>
-                              <span className="grow" />
-                              {!a.archived && (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() =>
-                                    setModal({
-                                      kind: "holding",
-                                      accountId: a.id,
-                                    })
-                                  }
-                                >
-                                  <Plus size={12} />
-                                  添加标的
-                                </Button>
-                              )}
-                            </div>
-                            {(s.holdings ?? [])
-                              .filter(
-                                (h) => h.accountId === a.id && !h.archived,
-                              )
-                              .map((h) => {
-                                const hs = holdingStats(s, h);
-                                return (
-                                  <div className="holding-row" key={h.id}>
-                                    <div className="holding-symbol">
-                                      {h.symbol.slice(0, 3)}
-                                    </div>
-                                    <div className="grow">
-                                      <strong>{h.symbol}</strong>
-                                      <small>{h.name}</small>
-                                    </div>
-                                    <div className="holding-numbers">
-                                      <strong>
-                                        {money(hs.value, a.currency)}
-                                      </strong>
-                                      <button
-                                        className={
-                                          hs.profit >= 0 ? "gain" : "loss"
-                                        }
-                                        disabled={a.archived}
-                                        title="手动填写收益率"
-                                        onClick={() =>
-                                          setModal({
-                                            kind: "holdingRoi",
-                                            holding: h,
-                                          })
-                                        }
-                                      >
-                                        {pct(hs.roi)} <Pencil size={10} />
-                                      </button>
-                                    </div>
-                                    {!a.archived && (
-                                      <Button
-                                        size="icon-sm"
-                                        variant="ghost"
-                                        aria-label={"编辑标的 " + h.symbol}
-                                        onClick={() =>
-                                          setModal({
-                                            kind: "holding",
-                                            accountId: a.id,
-                                            holding: h,
-                                          })
-                                        }
-                                      >
-                                        <Pencil size={12} />
-                                      </Button>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            <div className="unallocated">
-                              <span>未分配资金</span>
-                              <span>
-                                {money(unallocated(s, a), a.currency)}
-                              </span>
-                            </div>
-                          </div>
+                          <button
+                            className="enter-account"
+                            onClick={() => {
+                              setDetailId(a.id);
+                              window.scrollTo({ top: 0, behavior: "instant" });
+                            }}
+                          >
+                            <span>
+                              <strong>进入账户</strong>
+                              <small>
+                                {
+                                  (s.holdings ?? []).filter(
+                                    (h) => h.accountId === a.id && !h.archived,
+                                  ).length
+                                }{" "}
+                                个标的 · 管理金额与收益率
+                              </small>
+                            </span>
+                            <ArrowRight size={20} />
+                          </button>
                           <div className="account-actions">
                             {!a.archived ? (
                               <>
@@ -1299,6 +1250,44 @@ export default function InvestmentApp() {
                   归档账户会暂停相关定投；余额和历史收益仍计入总资产。空账户可删除。
                 </div>
               </>
+            )}
+            {tab === "accounts" && detailAccount && (
+              <AccountDetail
+                state={s}
+                account={detailAccount}
+                onBack={() => setDetailId(null)}
+                onEditAccount={() =>
+                  setModal({ kind: "account", account: detailAccount })
+                }
+                onAdd={() =>
+                  setModal({ kind: "holding", accountId: detailAccount.id })
+                }
+                onEdit={(h) =>
+                  setModal({
+                    kind: "holding",
+                    accountId: detailAccount.id,
+                    holding: h,
+                  })
+                }
+                onDelete={(h) =>
+                  setModal({
+                    kind: "confirm",
+                    title: "删除 " + h.name + "？",
+                    description:
+                      "将删除此标的、关联流水和定投计划，并从账户资产中移除。其他标的不受影响。此操作不可撤销。",
+                    action: () =>
+                      change(
+                        (next) => deleteHolding(next, h),
+                        "标的已删除，账户资产已重算",
+                      ),
+                  })
+                }
+                onRecords={() => {
+                  setRecordFilter(detailAccount.id);
+                  setJournalTab("entries");
+                  navigate("journal");
+                }}
+              />
             )}
             {tab === "plans" && (
               <>
@@ -2381,20 +2370,24 @@ export default function InvestmentApp() {
                   modalSubmit(() =>
                     change((next) => {
                       next.holdings ??= [];
-                      if (modal.holding)
+                      if (modal.holding) {
                         next.holdings = next.holdings.map((h) =>
                           h.id === holding.id ? holding : h,
                         );
-                      else {
+                        next.entries.push(
+                          updateHoldingAmounts(next, holding, amount, roi ?? 0),
+                        );
+                      } else {
                         next.holdings.push(holding);
                         if (amount > 0)
                           next.entries.push(
                             ...allocateHolding(next, holding, amount, source),
                           );
+                        next.entries.push(
+                          updateHoldingAmounts(next, holding, amount, roi ?? 0),
+                        );
                       }
-                      if (roi !== null)
-                        next.entries.push(roiValuation(next, holding, roi));
-                    }, "标的已保存，资产与收益已更新"),
+                    }, "标的已保存，金额与收益已更新"),
                   )
                 }
                 onRemove={
@@ -2403,51 +2396,14 @@ export default function InvestmentApp() {
                         const h = modal.holding!;
                         setModal({
                           kind: "confirm",
-                          title: "移除 " + h.symbol + "？",
+                          title: "删除 " + h.name + "？",
                           description:
-                            "有历史记录的标的会归档，当前余额转为账户未分配资金，相关定投暂停；空标的会删除。历史收益仍保留。",
+                            "此标的、关联流水和定投计划将被删除，其资产也会从账户中移除。此操作不可撤销。",
                           action: () =>
-                            change((next) => {
-                              const used =
-                                next.entries.some(
-                                  (e) => e.holdingId === h.id,
-                                ) ||
-                                next.plans.some((p) => p.holdingId === h.id);
-                              if (!used)
-                                next.holdings = next.holdings?.filter(
-                                  (x) => x.id !== h.id,
-                                );
-                              else {
-                                const value = holdingStats(next, h).value;
-                                if (value > 0) {
-                                  const transferId = uid();
-                                  const base = {
-                                    accountId: h.accountId,
-                                    amount: value,
-                                    date: today(),
-                                    fx: fxAt(next).rate,
-                                    note: "归档标的 " + h.symbol,
-                                    createdAt: new Date().toISOString(),
-                                    transferId,
-                                  };
-                                  next.entries.push(
-                                    {
-                                      ...base,
-                                      id: uid(),
-                                      kind: "withdraw",
-                                      holdingId: h.id,
-                                    },
-                                    { ...base, id: uid(), kind: "deposit" },
-                                  );
-                                }
-                                next.holdings!.find(
-                                  (x) => x.id === h.id,
-                                )!.archived = true;
-                                next.plans
-                                  .filter((p) => p.holdingId === h.id)
-                                  .forEach((p) => (p.paused = true));
-                              }
-                            }, "标的已移除，历史记录已保留"),
+                            change(
+                              (next) => deleteHolding(next, h),
+                              "标的已删除，账户资产已重算",
+                            ),
                         });
                       }
                     : undefined
@@ -2636,6 +2592,9 @@ function EntryForm({
           accountId: aid,
           ...(holdingId ? { holdingId } : {}),
           ...(entry?.automatic ? { automatic: true } : {}),
+          ...(entry?.principalAdjustment !== undefined
+            ? { principalAdjustment: entry.principalAdjustment }
+            : {}),
           kind,
           amount: Number(amount),
           date,
@@ -3637,21 +3596,29 @@ function HoldingForm({
   ) => Promise<void>;
   onRemove?: () => void;
 }) {
+  const initial = holding ? holdingStats(state, holding) : null;
   const [symbol, setSymbol] = useState(holding?.symbol ?? "");
   const [name, setName] = useState(holding?.name ?? "");
-  const [amount, setAmount] = useState("");
-  const [source, setSource] = useState<"existing" | "new">("existing");
-  const [roi, setRoi] = useState("");
+  const [amount, setAmount] = useState(initial ? String(initial.invested) : "");
+  const [roi, setRoi] = useState(
+    initial ? String(Number((initial.roi ?? 0).toFixed(6))) : "0",
+  );
   const account = state.accounts.find((a) => a.id === accountId)!;
+  const available = unallocated(state, account);
+  const [source, setSource] = useState<"existing" | "new">(
+    available > 0 ? "existing" : "new",
+  );
+  const estimate =
+    Number(amount) * (1 + Number(roi) / 100) - (initial?.withdrawn ?? 0);
   return (
     <FormShell
       busy={busy}
-      label="保存标的"
+      label={holding ? "保存修改" : "添加标的"}
       footer={
         onRemove && (
-          <Button variant="ghost" type="button" onClick={onRemove}>
+          <Button type="button" variant="ghost" onClick={onRemove}>
             <Trash2 size={13} />
-            移除标的
+            删除标的
           </Button>
         )
       }
@@ -3660,83 +3627,94 @@ function HoldingForm({
           {
             id: holding?.id ?? uid(),
             accountId,
-            symbol: symbol.trim().toUpperCase(),
-            name: name.trim() || symbol.trim().toUpperCase(),
+            name: name.trim(),
+            symbol: symbol.trim().toUpperCase() || name.trim().slice(0, 30),
             archived: holding?.archived ?? false,
           },
           Number(amount),
           source,
-          roi.trim() === "" ? null : Number(roi),
+          Number(roi),
         )
       }
     >
-      <Field label="标的代码" hint="BTC、DOGE、ETH、SOL 或基金代码">
-        <Input
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          maxLength={30}
-          placeholder={account.category === "fund" ? "例如 161725" : "例如 BTC"}
-          required
-        />
-      </Field>
-      <Field label="标的名称">
+      <Field label="标的名称" wide>
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={80}
-          placeholder={
-            account.category === "fund" ? "例如 白酒指数基金" : "例如 比特币"
-          }
+          placeholder="例如：比特币、以太坊、白酒指数基金"
+          required
         />
       </Field>
-      {!holding && (
-        <>
-          <Field
-            label="资金来源"
-            wide
-            hint={`账户可分配：${money(unallocated(state, account), account.currency)}`}
+      <Field
+        label={`投入金额（${account.currency}）`}
+        hint="累计投入本金，可直接修改"
+      >
+        <Input
+          type="number"
+          min="0"
+          max="1000000000000"
+          step="any"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.00"
+          required
+        />
+      </Field>
+      <Field label="收益率（%）" hint="累计收益率，亏损请填写负数">
+        <Input
+          type="number"
+          min="-100"
+          max="100000"
+          step="any"
+          value={roi}
+          onChange={(e) => setRoi(e.target.value)}
+          placeholder="例如 12.5 或 -3.2"
+          required
+        />
+      </Field>
+      <Field label="代码（选填）" wide>
+        <Input
+          value={symbol}
+          onChange={(e) => setSymbol(e.target.value)}
+          maxLength={30}
+          placeholder="例如 BTC、ETH、DOGE、SOL 或基金代码"
+        />
+      </Field>
+      {!holding && available > 0 && (
+        <Field label="资金来源" wide>
+          <NativeSelect
+            value={source}
+            onChange={(e) => setSource(e.target.value as "existing" | "new")}
           >
-            <NativeSelect
-              value={source}
-              onChange={(e) => setSource(e.target.value as "existing" | "new")}
-            >
-              <option value="existing">分配账户已有资金 · 不增加总投入</option>
-              <option value="new">新增外部投入 · 增加本金</option>
-            </NativeSelect>
-          </Field>
-          <Field label={`初始投入（${account.currency}）`}>
-            <Input
-              type="number"
-              min="0"
-              max="1000000000000"
-              step="any"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="可留空，稍后记账或定投"
-            />
-          </Field>
-          <Field
-            label="当前累计收益率（%）"
-            hint="可留空；填写时需要先设置本金"
-          >
-            <Input
-              type="number"
-              min="-100"
-              max="100000"
-              step="any"
-              value={roi}
-              onChange={(e) => setRoi(e.target.value)}
-              placeholder="例如 12.5 或 -3.2"
-            />
-          </Field>
-        </>
+            <option value="existing">
+              使用账户已有资金（可用 {money(available, account.currency)}）
+            </option>
+            <option value="new">新增投入</option>
+          </NativeSelect>
+        </Field>
       )}
-      <div className="form-tip field-wide">
-        每个标的分别记录本金、估值和收益。已有资金分配不会重复计入账户总资产；收益率可随时在标的右侧更新。
+      <div className="holding-preview field-wide">
+        <span>保存后的标的估值</span>
+        <strong>
+          {money(Number.isFinite(estimate) ? estimate : 0, account.currency)}
+        </strong>
+        <small>
+          投入金额 ×（1 + 收益率）
+          {initial?.withdrawn
+            ? ` − 已取出 ${money(initial.withdrawn, account.currency)}`
+            : ""}
+        </small>
       </div>
+      {holding && (
+        <div className="form-tip field-wide">
+          修改金额会更正该标的的投入本金，收益率决定当前估值；账户总额和图表会自动更新。
+        </div>
+      )}
     </FormShell>
   );
 }
+
 function HoldingRoiForm({
   state,
   holding,
@@ -3805,5 +3783,179 @@ function HoldingRoiForm({
         累计转出。保存会新增一条估值记录，可在投资手账中修改或删除。
       </div>
     </FormShell>
+  );
+}
+
+function AccountDetail({
+  state,
+  account,
+  onBack,
+  onEditAccount,
+  onAdd,
+  onEdit,
+  onDelete,
+  onRecords,
+}: {
+  state: Ledger;
+  account: Account;
+  onBack: () => void;
+  onEditAccount: () => void;
+  onAdd: () => void;
+  onEdit: (h: Holding) => void;
+  onDelete: (h: Holding) => void;
+  onRecords: () => void;
+}) {
+  const stats = accountStats(state, account);
+  const positions = (state.holdings ?? []).filter(
+    (h) => h.accountId === account.id && !h.archived,
+  );
+  return (
+    <div className="account-detail">
+      <div className="detail-toolbar">
+        <Button variant="ghost" onClick={onBack}>
+          <ChevronLeft size={16} />
+          全部账户
+        </Button>
+        <Button variant="outline" onClick={onEditAccount}>
+          <Pencil size={13} />
+          编辑账户
+        </Button>
+      </div>
+      <section className="panel detail-summary">
+        <div className="detail-identity">
+          <AssetIcon category={account.category} />
+          <div>
+            <span>
+              {account.platform || "个人账户"} · {account.currency}
+            </span>
+            <h2>{account.name}</h2>
+            <p>
+              {positions.length} 个标的{account.archived ? " · 账户已归档" : ""}
+            </p>
+          </div>
+        </div>
+        <div className="detail-total">
+          <span>账户总资产</span>
+          <strong>{money(stats.value, account.currency)}</strong>
+        </div>
+        <div className="detail-return">
+          <span>累计收益</span>
+          <strong className={stats.profit >= 0 ? "gain" : "loss"}>
+            {money(stats.profit, account.currency)}
+          </strong>
+          <small className={stats.profit >= 0 ? "gain" : "loss"}>
+            {pct(stats.roi)}
+          </small>
+        </div>
+      </section>
+      <section className="panel detail-holdings">
+        <div className="panel-header">
+          <div>
+            <h2>我的标的</h2>
+            <p>名称、投入金额与收益率，在这里统一管理。</p>
+          </div>
+          <Button
+            className="primary-button"
+            onClick={onAdd}
+            disabled={account.archived}
+          >
+            <Plus size={15} />
+            添加标的
+          </Button>
+        </div>
+        {positions.length ? (
+          <div className="table-scroll">
+            <Table className="data-table holding-table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>标的名称</TableHead>
+                  <TableHead className="right">投入金额</TableHead>
+                  <TableHead className="right">收益率</TableHead>
+                  <TableHead className="right">当前估值</TableHead>
+                  <TableHead className="right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {positions.map((h) => {
+                  const hs = holdingStats(state, h);
+                  return (
+                    <TableRow key={h.id}>
+                      <TableCell>
+                        <div className="row">
+                          <span className="holding-symbol">
+                            {h.symbol.slice(0, 3)}
+                          </span>
+                          <div>
+                            <strong>{h.name}</strong>
+                            {h.symbol !== h.name && <small>{h.symbol}</small>}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="right">
+                        {money(hs.invested, account.currency)}
+                      </TableCell>
+                      <TableCell
+                        className={
+                          "right " + (hs.profit >= 0 ? "gain" : "loss")
+                        }
+                      >
+                        {pct(hs.roi)}
+                      </TableCell>
+                      <TableCell className="right">
+                        <strong>{money(hs.value, account.currency)}</strong>
+                      </TableCell>
+                      <TableCell>
+                        <div className="holding-controls">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onEdit(h)}
+                            disabled={account.archived}
+                          >
+                            <Pencil size={12} />
+                            编辑
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onDelete(h)}
+                          >
+                            <Trash2 size={12} />
+                            删除
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        ) : (
+          <Empty
+            icon={Wallet}
+            title="添加这个账户的第一个标的"
+            text="填写名称、投入金额和收益率，账户资产就会自动汇总。"
+            action={
+              <Button onClick={onAdd} disabled={account.archived}>
+                <Plus size={14} />
+                添加标的
+              </Button>
+            }
+          />
+        )}
+        <div className="detail-balance">
+          <span>
+            账户未分配资金{" "}
+            <strong>
+              {money(unallocated(state, account), account.currency)}
+            </strong>
+          </span>
+          <Button variant="ghost" size="sm" onClick={onRecords}>
+            查看账户流水 <ArrowRight size={13} />
+          </Button>
+        </div>
+      </section>
+    </div>
   );
 }

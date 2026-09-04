@@ -1,3 +1,8 @@
+import {
+  updateHoldingAmounts,
+  holdingStats,
+  deleteHolding,
+} from "../lib/ledger.ts";
 import assert from "node:assert/strict";
 const origin = process.env.CLARITY_TEST_ORIGIN || "http://127.0.0.1:3001";
 assert.equal(new URL(origin).hostname, "127.0.0.1");
@@ -84,6 +89,22 @@ try {
   data.state.plans.find((p) => p.accountId === id).paused = false;
   data = await put(data);
   assert.equal(data.state.entries.filter((e) => e.accountId === id).length, 0);
+  const holding = data.state.holdings.find((h) => h.accountId === id);
+  holding.name = "可编辑的标的";
+  data.state.entries.push(
+    updateHoldingAmounts(data.state, holding, 200, 10, date),
+  );
+  data = await put(data);
+  assert.equal(holdingStats(data.state, holding).value, 220);
+  data.state.entries.push(
+    updateHoldingAmounts(data.state, holding, 50, -20, date),
+  );
+  data = await put(data);
+  assert.equal(holdingStats(data.state, holding).invested, 50);
+  assert.equal(holdingStats(data.state, holding).value, 40);
+  deleteHolding(data.state, holding);
+  data = await put(data);
+  assert.ok(!data.state.holdings.some((h) => h.id === holding.id));
   data.state.plans = data.state.plans.filter((p) => p.accountId !== id);
   data.state.holdings = data.state.holdings.filter((h) => h.accountId !== id);
   data.state.accounts = data.state.accounts.filter((a) => a.id !== id);

@@ -30,6 +30,7 @@ export type Entry = {
   holdingId?: string;
   automatic?: boolean;
   reportedRoi?: number;
+  principalAdjustment?: number;
   planKey?: string;
   transferId?: string;
 };
@@ -412,6 +413,7 @@ export function accountStats(
       if (e.kind === "deposit") invested += e.amount;
       if (e.kind === "withdraw") withdrawn += e.amount;
     }
+    invested += e.principalAdjustment ?? 0;
     if (e.kind === "income") income += e.amount;
     if (e.kind === "fee") fees += e.amount;
     if (e.kind === "valuation") marked = e.date;
@@ -541,6 +543,7 @@ export function portfolio(
     withdrawn = 0;
   for (const e of state.entries.filter((e) => e.date <= end && !e.transferId)) {
     const a = state.accounts.find((a) => a.id === e.accountId)!;
+    invested += convert(e.principalAdjustment ?? 0, a.currency, currency, e.fx);
     if (e.kind === "deposit")
       invested += convert(e.amount, a.currency, currency, e.fx);
     if (e.kind === "withdraw")
@@ -583,6 +586,7 @@ export function history(
       const e = entries[index++],
         a = accounts.get(e.accountId)!;
       applyEntry(values, e);
+      net += convert(e.principalAdjustment ?? 0, a.currency, currency, e.fx);
       if (!e.transferId && (e.kind === "deposit" || e.kind === "withdraw"))
         net +=
           convert(e.amount, a.currency, currency, e.fx) *
@@ -828,6 +832,13 @@ export function validateLedger(input: unknown): Ledger {
             e.accountId,
         "标的必须属于所选账户",
       );
+    if (e.principalAdjustment !== undefined)
+      assert(
+        num(e.principalAdjustment, -1e12, 1e12) &&
+          e.kind === "valuation" &&
+          !!e.holdingId,
+        "本金更正格式无效",
+      );
     if (e.reportedRoi !== undefined)
       assert(
         num(e.reportedRoi, -100, 100000) && e.kind === "valuation",
@@ -991,4 +1002,79 @@ export function validateLedger(input: unknown): Ledger {
     "设置无效",
   );
   return s;
+}
+
+// Editing a holding is a dated principal correction plus valuation, not another full deposit.
+export function updateHoldingAmounts(
+  state: Ledger,
+  holding: Holding,
+  principal: number,
+  rate: number,
+  date = today(),
+): Entry {
+  if (!Number.isFinite(principal) || principal < 0 || principal > 1e12)
+    throw Error("投入金额必须在 0 至 1 万亿之间");
+  if (!Number.isFinite(rate) || rate < -100 || rate > 100000)
+    throw Error("收益率需在 -100% 至 100000% 之间");
+  const stats = holdingStats(state, holding, date);
+  const value = round(principal * (1 + rate / 100) - stats.withdrawn);
+  if (value < 0)
+    throw Error("投入金额和收益率不能使估值低于已取出金额，请核对历史取出记录");
+  return {
+    id: uid(),
+    accountId: holding.accountId,
+    holdingId: holding.id,
+    kind: "valuation",
+    amount: value,
+    date,
+    fx: fxAt(state, date).rate,
+    reportedRoi: rate,
+    principalAdjustment: round(principal - stats.invested),
+    note: "编辑标的：投入金额 " + principal + "，收益率 " + rate + "%",
+    createdAt: new Date(
+      Math.max(
+        Date.now(),
+        ...state.entries
+          .filter((e) => e.date === date)
+          .map((e) => Date.parse(e.createdAt) + 1),
+      ),
+    ).toISOString(),
+  };
+}
+// Remove the position, its records and plans. Keep counterpart transfers as external flows.
+export function deleteHolding(state: Ledger, holding: Holding): void {
+  const transfers = new Set(
+    state.entries
+      .filter((e) => e.holdingId === holding.id && e.transferId)
+      .map((e) => e.transferId),
+  );
+  const buckets = new Map<string, number>();
+  const removedPlans = new Set(
+    state.plans.filter((p) => p.holdingId === holding.id).map((p) => p.id),
+  );
+  const retained: Entry[] = [];
+  for (const entry of sortedEntries(state.entries)) {
+    const e = { ...entry };
+    if (
+      e.accountId === holding.accountId &&
+      e.kind === "valuation" &&
+      !e.holdingId
+    )
+      e.amount = round(
+        e.amount - (buckets.get(holding.accountId + ":" + holding.id) ?? 0),
+      );
+    applyEntry(buckets, entry);
+    if (e.holdingId === holding.id) continue;
+    if (e.transferId && transfers.has(e.transferId)) {
+      delete e.transferId;
+      e.note += "（关联标的已删除）";
+    }
+    retained.push(e);
+  }
+  state.entries = retained;
+  state.holdings = state.holdings?.filter((h) => h.id !== holding.id);
+  state.plans = state.plans.filter((p) => p.holdingId !== holding.id);
+  state.skipped = state.skipped.filter(
+    (k) => ![...removedPlans].some((id) => k.startsWith(id + ":")),
+  );
 }

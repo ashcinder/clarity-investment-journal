@@ -4,6 +4,8 @@ import {
   seedLedger,
   allocateHolding,
   holdingStats,
+  updateHoldingAmounts,
+  deleteHolding,
   accountStats,
   unallocated,
   roiValuation,
@@ -237,4 +239,64 @@ test("archiving a holding transfers its balance without losing historical profit
   assert.equal(holdingStats(s, h).profit, 10);
   assert.equal(accountStats(s, s.accounts[0]).value, 1210);
   assert.equal(portfolio(s).profit, 10);
+});
+
+test("editing holding principal in both directions replaces its basis without duplicating money", () => {
+  const s = fixture();
+  const h = holding(s);
+  s.entries.push(...allocateHolding(s, h, 100, "new", date));
+  s.entries.push(updateHoldingAmounts(s, h, 200, 10, date));
+  validateLedger(s);
+  assert.equal(holdingStats(s, h).invested, 200);
+  assert.equal(holdingStats(s, h).value, 220);
+  assert.equal(holdingStats(s, h).roi, 10);
+  assert.equal(portfolio(s).invested, 1420);
+  s.entries.push(updateHoldingAmounts(s, h, 50, -20, date));
+  validateLedger(s);
+  assert.equal(holdingStats(s, h).invested, 50);
+  assert.equal(holdingStats(s, h).value, 40);
+  assert.equal(holdingStats(s, h).roi, -20);
+  assert.equal(portfolio(s).invested, 1270);
+  assert.equal(history(s, "USD", "all", date).at(-1).value, 1260);
+  s.entries.push(updateHoldingAmounts(s, h, 0, 0, date));
+  validateLedger(s);
+  assert.equal(portfolio(s).value, 1220);
+});
+test("deleting a holding removes its value, records and plans while preserving other holdings", () => {
+  const s = fixture();
+  const h = holding(s);
+  const other = holding(s, "ETH");
+  s.entries.push(...allocateHolding(s, h, 100, "existing", date));
+  s.entries.push(...allocateHolding(s, other, 50, "new", date));
+  s.entries.push(updateHoldingAmounts(s, h, 200, 10, date));
+  s.plans = [plan({ holdingId: h.id })];
+  const before = portfolio(s).value;
+  deleteHolding(s, h);
+  validateLedger(s);
+  assert.equal(portfolio(s).value, before - 220);
+  assert.equal(holdingStats(s, other).value, 50);
+  assert.equal(s.plans.length, 0);
+  assert.ok(!s.entries.some((e) => e.holdingId === h.id));
+  assert.ok(!s.holdings.some((x) => x.id === h.id));
+  assert.equal(portfolio(s).profit, 0);
+});
+test("deletion corrects later whole-account valuations so removed assets never reappear", () => {
+  const s = fixture();
+  const h = holding(s);
+  s.entries.push(...allocateHolding(s, h, 100, "existing", date));
+  const mark = updateHoldingAmounts(s, h, 100, 10, date);
+  s.entries.push(mark);
+  s.entries.push({
+    ...mark,
+    id: "account-mark",
+    holdingId: undefined,
+    principalAdjustment: undefined,
+    amount: 1300,
+    createdAt: new Date(Date.parse(mark.createdAt) + 1).toISOString(),
+  });
+  validateLedger(s);
+  deleteHolding(s, h);
+  validateLedger(s);
+  assert.equal(accountStats(s, s.accounts[0]).value, 1190);
+  assert.equal(history(s, "USD", "all", date).at(-1).value, 1210);
 });
