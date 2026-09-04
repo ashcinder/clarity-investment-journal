@@ -1061,6 +1061,63 @@ export function validateLedger(input: unknown): Ledger {
   return s;
 }
 
+export function principalFromCurrentValue(
+  value: number,
+  rate: number,
+  withdrawn = 0,
+  totalLossPrincipal?: number,
+): number {
+  if (!Number.isFinite(value) || value < 0 || value > 1e12)
+    throw Error("当前金额必须在 0 至 1 万亿之间");
+  if (!Number.isFinite(rate) || rate < -100 || rate > 100000)
+    throw Error("收益率需在 -100% 至 100000% 之间");
+  if (!Number.isFinite(withdrawn) || withdrawn < 0)
+    throw Error("历史取出金额无效");
+  if (rate === -100) {
+    if (value !== 0 || withdrawn !== 0)
+      throw Error("收益率为 -100% 时，当前金额与历史取出金额必须为 0");
+    if (
+      totalLossPrincipal === undefined ||
+      !Number.isFinite(totalLossPrincipal) ||
+      totalLossPrincipal <= 0 ||
+      totalLossPrincipal > 1e12
+    )
+      throw Error("亏损 100% 时无法反算本金，请填写原始投入金额");
+    return totalLossPrincipal;
+  }
+  const principal = (value + withdrawn) / (1 + rate / 100);
+  if (!Number.isFinite(principal) || principal > 1e12)
+    throw Error("反算本金超过上限，请核对当前金额和收益率");
+  return principal;
+}
+
+export function updateHoldingCurrentValue(
+  state: Ledger,
+  holding: Holding,
+  value: number,
+  rate: number,
+  totalLossPrincipal?: number,
+  date = today(),
+): Entry {
+  const stats = holdingStats(state, holding, date);
+  const principal = principalFromCurrentValue(
+    value,
+    rate,
+    stats.withdrawn,
+    totalLossPrincipal ?? stats.invested,
+  );
+  return {
+    ...updateHoldingAmounts(state, holding, principal, rate, date),
+    amount: round(value),
+    note:
+      "编辑资产：当前金额 " +
+      value +
+      "，收益率 " +
+      rate +
+      "%（本金按收益率反算）",
+  };
+}
+
 // Editing a holding is a dated principal correction plus valuation, not another full deposit.
 export function updateHoldingAmounts(
   state: Ledger,

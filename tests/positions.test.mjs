@@ -6,6 +6,8 @@ import {
   clearLedger,
   recordPosition,
   updateHoldingAmounts,
+  updateHoldingCurrentValue,
+  principalFromCurrentValue,
   allocateHolding,
   holdingStats,
   positionStats,
@@ -175,4 +177,53 @@ test("simplifying an existing position preserves history; auto deposits add mone
   assert.equal(holdingStats(result.state, h).roi, 120 / 1260 * 100);
   assert.equal(materializeAutomatic(result.state, new Date("2026-09-04T06:00:00Z")).added, 0);
   validateLedger(result.state);
+});
+
+test("current-value entry derives principal for gains and losses and never changes the entered value", () => {
+  const s = fixture();
+  const h = { id: "current", accountId: "wallet", name: "Doge", symbol: "Doge", trackingMode: "amount", archived: false };
+  s.holdings.push(h);
+  const principal = principalFromCurrentValue(1100, 10);
+  assert.ok(Math.abs(principal - 1000) < 1e-8);
+  s.entries.push(...allocateHolding(s, h, principal, "new", date));
+  s.entries.push(updateHoldingCurrentValue(s, h, 1100, 10, undefined, date));
+  assert.equal(holdingStats(s, h).invested, 1000);
+  assert.equal(holdingStats(s, h).value, 1100);
+  assert.equal(holdingStats(s, h).profit, 100);
+  s.entries.push(updateHoldingCurrentValue(s, h, 900, -10, undefined, date));
+  assert.equal(holdingStats(s, h).invested, 1000);
+  assert.equal(holdingStats(s, h).profit, -100);
+  s.entries.push(updateHoldingCurrentValue(s, h, 1234.56, 7.3, undefined, date));
+  assert.equal(holdingStats(s, h).value, 1234.56);
+  validateLedger(s);
+});
+
+test("reverse-calculated principal includes historical withdrawals and unchanged edits preserve return", () => {
+  const s = fixture();
+  const h = add(s, "BTC", "crypto", input(1, 1000, 1100));
+  s.entries.push({ id: "withdraw-current", accountId: "wallet", holdingId: h.id, kind: "withdraw", amount: 200, date,
+    fx: s.fxRates[0].rate, note: "test", createdAt: new Date(Date.now() + 10).toISOString() });
+  const before = holdingStats(s, h);
+  assert.equal(before.value, 900);
+  s.entries.push(updateHoldingCurrentValue(s, h, before.value, before.roi, undefined, date));
+  const after = holdingStats(s, h);
+  assert.equal(after.value, 900);
+  assert.equal(after.invested, 1000);
+  assert.equal(after.profit, 100);
+  validateLedger(s);
+});
+
+test("total loss uses known or explicitly supplied principal and rejects inconsistent values", () => {
+  assert.throws(() => principalFromCurrentValue(0, -100), /原始投入/);
+  assert.throws(() => principalFromCurrentValue(1, -100, 0, 1000), /必须为 0/);
+  assert.throws(() => principalFromCurrentValue(0, -100, 100, 1000), /必须为 0/);
+  assert.throws(() => principalFromCurrentValue(100, -101), /收益率/);
+  assert.throws(() => principalFromCurrentValue(1e12, -99), /超过上限/);
+  const s = fixture();
+  const h = add(s, "BTC", "crypto", input(1, 1000, 1100));
+  s.entries.push(updateHoldingCurrentValue(s, h, 0, -100, undefined, date));
+  assert.equal(holdingStats(s, h).invested, 1000);
+  assert.equal(holdingStats(s, h).profit, -1000);
+  assert.equal(holdingStats(s, h).roi, -100);
+  validateLedger(s);
 });

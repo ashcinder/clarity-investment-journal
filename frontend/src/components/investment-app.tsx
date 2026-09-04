@@ -75,7 +75,8 @@ import {
   planAccountAmount,
   holdingStats,
   assetType,
-  updateHoldingAmounts,
+  updateHoldingCurrentValue,
+  principalFromCurrentValue,
   deleteHolding,
   unallocated,
   allocateHolding,
@@ -2470,9 +2471,16 @@ export default function InvestmentApp() {
                 accountId={modal.accountId}
                 holding={modal.holding}
                 busy={busy}
-                onSubmit={(holding, amount, source, roi) =>
+                onSubmit={(holding, amount, source, roi, totalLossPrincipal) =>
                   modalSubmit(() =>
                     change((next) => {
+                      const previous = holdingStats(next, holding);
+                      const principal = principalFromCurrentValue(
+                        amount,
+                        roi,
+                        previous.withdrawn,
+                        totalLossPrincipal ?? previous.invested,
+                      );
                       next.holdings ??= [];
                       if (modal.holding)
                         next.holdings = next.holdings.map((h) =>
@@ -2480,13 +2488,24 @@ export default function InvestmentApp() {
                         );
                       else {
                         next.holdings.push(holding);
-                        if (amount > 0)
+                        if (principal > 0)
                           next.entries.push(
-                            ...allocateHolding(next, holding, amount, source),
+                            ...allocateHolding(
+                              next,
+                              holding,
+                              principal,
+                              source,
+                            ),
                           );
                       }
                       next.entries.push(
-                        updateHoldingAmounts(next, holding, amount, roi),
+                        updateHoldingCurrentValue(
+                          next,
+                          holding,
+                          amount,
+                          roi,
+                          totalLossPrincipal,
+                        ),
                       );
                     }, "资产已保存，投入、收益与估值已更新"),
                   )
@@ -3879,6 +3898,7 @@ function HoldingForm({
     amount: number,
     source: "existing" | "new",
     roi: number,
+    totalLossPrincipal?: number,
   ) => Promise<void>;
   onRemove?: () => void;
 }) {
@@ -3888,15 +3908,28 @@ function HoldingForm({
   const [type, setType] = useState<Category>(
     holding?.assetType ?? account.category,
   );
-  const [amount, setAmount] = useState(initial ? String(initial.invested) : "");
+  const [amount, setAmount] = useState(initial ? String(initial.value) : "");
   const [roi, setRoi] = useState(
     initial?.roi != null ? String(initial.roi) : "0",
   );
   const [source, setSource] = useState<"new" | "existing">("new");
-  const principal = Number(amount);
+  const [lossPrincipal, setLossPrincipal] = useState(
+    initial ? String(initial.invested) : "",
+  );
   const withdrawn = initial?.withdrawn ?? 0;
-  const profit = (principal * Number(roi)) / 100;
-  const value = principal + profit - withdrawn;
+  const value = Number(amount);
+  let principal: number | null = null;
+  try {
+    principal = principalFromCurrentValue(
+      value,
+      Number(roi),
+      withdrawn,
+      Number(lossPrincipal),
+    );
+  } catch {
+    /* Incomplete inputs are validated when the form is submitted. */
+  }
+  const profit = principal === null ? null : value + withdrawn - principal;
   return (
     <FormShell
       busy={busy}
@@ -3921,9 +3954,10 @@ function HoldingForm({
             assetType: type,
             trackingMode: "amount",
           },
-          principal,
+          value,
           source,
           Number(roi),
+          Number(roi) === -100 ? Number(lossPrincipal) : undefined,
         )
       }
     >
@@ -3949,11 +3983,11 @@ function HoldingForm({
         </NativeSelect>
       </Field>
       <Field
-        label={`累计投入金额（${account.currency}）`}
+        label={`当前金额（${account.currency}）`}
         hint={
           type === "grid"
-            ? "填写实际投入的本金 / 保证金"
-            : "填写这项资产累计投入的本金"
+            ? "填写仓位当前总权益，已包含盈亏"
+            : "填写平台显示的当前资产总金额，已包含盈亏"
         }
       >
         <Input
@@ -3979,6 +4013,23 @@ function HoldingForm({
           required
         />
       </Field>
+      {Number(roi) === -100 && (
+        <Field
+          label={`原始投入金额（${account.currency}）`}
+          hint="亏损 100% 且余额为 0 时无法反算本金，仅此情况需要填写。"
+          wide
+        >
+          <Input
+            type="number"
+            min="0.00000001"
+            max="1000000000000"
+            step="any"
+            value={lossPrincipal}
+            onChange={(e) => setLossPrincipal(e.target.value)}
+            required
+          />
+        </Field>
+      )}
       {!holding && unallocated(state, account) > 0 && (
         <Field label="本金来源" wide>
           <NativeSelect
@@ -3994,22 +4045,24 @@ function HoldingForm({
         </Field>
       )}
       <div className="holding-preview field-wide">
-        <span>当前价值 · 自动计算</span>
+        <span>当前金额</span>
         <strong>{money(value, account.currency)}</strong>
         <small>
-          投入 {money(principal, account.currency)} · 收益{" "}
-          {money(profit, account.currency)}
+          反算本金{" "}
+          {principal === null ? "—" : money(principal, account.currency)} · 收益{" "}
+          {profit === null ? "—" : money(profit, account.currency)}
         </small>
         <small>
-          投入金额 ×（1 + 收益率）
-          {withdrawn > 0
-            ? ` − 已取出 ${money(withdrawn, account.currency)}`
-            : ""}
+          {Number(roi) === -100
+            ? "按填写的原始本金记录全部亏损"
+            : withdrawn > 0
+              ? `本金 =（当前金额 + 已取出 ${money(withdrawn, account.currency)}）÷（1 + 收益率）`
+              : "本金 = 当前金额 ÷（1 + 收益率）"}
         </small>
       </div>
       {holding && (
         <div className="form-tip field-wide">
-          保存会记录今天的估值。定投自动累计投入金额，之后只需更新收益率。
+          保存会记录今天的估值，并按当前金额和收益率校正本金。定投仍会自动累计。
         </div>
       )}
     </FormShell>
@@ -4153,7 +4206,7 @@ function AccountDetail({
         <div className="panel-header">
           <div>
             <h2>我的资产</h2>
-            <p>记录投入金额和收益率，自动汇总每项资产的价值。</p>
+            <p>填写当前金额和收益率，自动反算本金与收益。</p>
           </div>
           <Button
             className="primary-button"
@@ -4244,7 +4297,7 @@ function AccountDetail({
           <Empty
             icon={Wallet}
             title="添加这个账户的第一个资产"
-            text="填写资产名称、投入金额和收益率，开始记录你的投资。"
+            text="填写资产名称、当前金额和收益率，开始记录你的投资。"
             action={
               <Button onClick={onAdd} disabled={account.archived}>
                 <Plus size={14} />
