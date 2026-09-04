@@ -2956,7 +2956,7 @@ function AccountForm({
           if (busy || imageJob.current) return;
           const files = event.dataTransfer.files;
           if (files.length !== 1) {
-            setImageError(files.length > 1 ? "每次请拖入一张图片。" : "请拖入电脑中的 PNG、JPG 或 WebP 图片文件。");
+            setImageError(files.length > 1 ? "每次请拖入一张图片。" : "请拖入电脑中的 PNG、JPG、WebP 或 SVG 图片文件。");
             return;
           }
           void selectImage(files[0]);
@@ -2968,12 +2968,12 @@ function AccountForm({
         <div className="account-image-controls">
           <strong>{imageDragOver ? "松开即可上传图片" : "账户图片"}</strong>
           <p id="account-image-hint">
-            拖动图片到此处，或点击上传。支持 PNG、JPG、WebP，最大 5 MB。
+            拖动图片到此处，或点击上传。支持 PNG、JPG、WebP、SVG，最大 5 MB。
           </p>
           <input
             ref={fileInput}
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
             aria-label="选择账户图片"
             aria-describedby="account-image-hint"
             hidden
