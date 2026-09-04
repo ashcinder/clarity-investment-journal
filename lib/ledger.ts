@@ -1,7 +1,7 @@
-export type Currency = 'USD' | 'CNY';
-export type Category = 'crypto' | 'stock' | 'grid' | 'fund';
-export type Market = 'CRYPTO' | 'CN' | 'US';
-export type EntryKind = 'deposit' | 'withdraw' | 'valuation' | 'income' | 'fee';
+export type Currency = "USD" | "CNY";
+export type Category = "crypto" | "stock" | "grid" | "fund";
+export type Market = "CRYPTO" | "CN" | "US";
+export type EntryKind = "deposit" | "withdraw" | "valuation" | "income" | "fee";
 export type Account = {
   id: string;
   name: string;
@@ -10,6 +10,13 @@ export type Account = {
   currency: Currency;
   archived: boolean;
   note: string;
+};
+export type Holding = {
+  id: string;
+  accountId: string;
+  symbol: string;
+  name: string;
+  archived: boolean;
 };
 export type Entry = {
   id: string;
@@ -20,6 +27,9 @@ export type Entry = {
   fx: number;
   note: string;
   createdAt: string;
+  holdingId?: string;
+  automatic?: boolean;
+  reportedRoi?: number;
   planKey?: string;
   transferId?: string;
 };
@@ -28,7 +38,10 @@ export type Plan = {
   accountId: string;
   name: string;
   amount: number;
-  frequency: 'daily' | 'weekly' | 'monthly';
+  frequency: "daily" | "weekdays" | "weekly" | "monthly";
+  holdingId?: string;
+  mode?: "auto" | "manual";
+  autoFrom?: string;
   day: number;
   time: string;
   startDate: string;
@@ -50,6 +63,7 @@ export type CalendarConfig = {
 export type Ledger = {
   version: 1;
   accounts: Account[];
+  holdings?: Holding[];
   entries: Entry[];
   plans: Plan[];
   journals: Journal[];
@@ -63,122 +77,122 @@ export const categories: Record<
   { label: string; color: string; symbol: string; desc: string }
 > = {
   crypto: {
-    label: 'Crypto 现货',
-    color: '#238f7d',
-    symbol: '₿',
-    desc: '长期持有，持续积累',
+    label: "Crypto 现货",
+    color: "#238f7d",
+    symbol: "₿",
+    desc: "长期持有，持续积累",
   },
   stock: {
-    label: '美股 · ETF',
-    color: '#7292c5',
-    symbol: 'S',
-    desc: '与优秀的公司同行',
+    label: "美股 · ETF",
+    color: "#7292c5",
+    symbol: "S",
+    desc: "与优秀的公司同行",
   },
   grid: {
-    label: '合约网格',
-    color: '#c49b5b',
-    symbol: '⊞',
-    desc: '独立策略，独立记录',
+    label: "合约网格",
+    color: "#c49b5b",
+    symbol: "⊞",
+    desc: "独立策略，独立记录",
   },
   fund: {
-    label: '人民币基金',
-    color: '#a296c4',
-    symbol: '¥',
-    desc: '小额定投，日积月累',
+    label: "人民币基金",
+    color: "#a296c4",
+    symbol: "¥",
+    desc: "小额定投，日积月累",
   },
 };
 export const kinds: Record<EntryKind, string> = {
-  deposit: '投入',
-  withdraw: '取出',
-  valuation: '估值更新',
-  income: '分红 / 收益入账',
-  fee: '手续费',
+  deposit: "投入",
+  withdraw: "取出",
+  valuation: "估值更新",
+  income: "分红 / 收益入账",
+  fee: "手续费",
 };
-export const money = (n: number, c: Currency = 'USD') =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
+export const money = (n: number, c: Currency = "USD") =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
     currency: c,
-    currencyDisplay: 'narrowSymbol',
+    currencyDisplay: "narrowSymbol",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n);
 export const pct = (n: number | null) =>
-  n === null ? '—' : `${n > 0 ? '+' : ''}${n.toFixed(2)}%`;
+  n === null ? "—" : `${n > 0 ? "+" : ""}${n.toFixed(2)}%`;
 export const uid = () => crypto.randomUUID();
-export const today = (zone = 'Asia/Shanghai', now = new Date()) =>
-  new Intl.DateTimeFormat('en-CA', {
+export const today = (zone = "Asia/Shanghai", now = new Date()) =>
+  new Intl.DateTimeFormat("en-CA", {
     timeZone: zone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
   }).format(now);
 export const round = (x: number) =>
   Math.round((x + Number.EPSILON) * 100000000) / 100000000;
 export function addDays(date: string, n: number) {
-  const d = new Date(date + 'T12:00:00Z');
+  const d = new Date(date + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
 export function daysBetween(a: string, b: string) {
   return Math.round(
-    (Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000,
+    (Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000,
   );
 }
 export function range(a: string, b: string) {
   const r: string[] = [];
   for (let d = a; d <= b; d = addDays(d, 1)) {
     r.push(d);
-    if (r.length > 36600) throw Error('日期范围过大');
+    if (r.length > 36600) throw Error("日期范围过大");
   }
   return r;
 }
 export const defaultCalendar: CalendarConfig = {
   CN: {
-    '2026': [
-      ...range('2026-01-01', '2026-01-03'),
-      ...range('2026-02-15', '2026-02-23'),
-      ...range('2026-04-04', '2026-04-06'),
-      ...range('2026-05-01', '2026-05-05'),
-      ...range('2026-06-19', '2026-06-21'),
-      ...range('2026-09-25', '2026-09-27'),
-      ...range('2026-10-01', '2026-10-07'),
+    "2026": [
+      ...range("2026-01-01", "2026-01-03"),
+      ...range("2026-02-15", "2026-02-23"),
+      ...range("2026-04-04", "2026-04-06"),
+      ...range("2026-05-01", "2026-05-05"),
+      ...range("2026-06-19", "2026-06-21"),
+      ...range("2026-09-25", "2026-09-27"),
+      ...range("2026-10-01", "2026-10-07"),
     ],
   },
   US: {
-    '2026': [
-      '2026-01-01',
-      '2026-01-19',
-      '2026-02-16',
-      '2026-04-03',
-      '2026-05-25',
-      '2026-06-19',
-      '2026-07-03',
-      '2026-09-07',
-      '2026-11-26',
-      '2026-12-25',
+    "2026": [
+      "2026-01-01",
+      "2026-01-19",
+      "2026-02-16",
+      "2026-04-03",
+      "2026-05-25",
+      "2026-06-19",
+      "2026-07-03",
+      "2026-09-07",
+      "2026-11-26",
+      "2026-12-25",
     ],
-    '2027': [
-      '2027-01-01',
-      '2027-01-18',
-      '2027-02-15',
-      '2027-03-26',
-      '2027-05-31',
-      '2027-06-18',
-      '2027-07-05',
-      '2027-09-06',
-      '2027-11-25',
-      '2027-12-24',
+    "2027": [
+      "2027-01-01",
+      "2027-01-18",
+      "2027-02-15",
+      "2027-03-26",
+      "2027-05-31",
+      "2027-06-18",
+      "2027-07-05",
+      "2027-09-06",
+      "2027-11-25",
+      "2027-12-24",
     ],
-    '2028': [
-      '2028-01-17',
-      '2028-02-21',
-      '2028-04-14',
-      '2028-05-29',
-      '2028-06-19',
-      '2028-07-04',
-      '2028-09-04',
-      '2028-11-23',
-      '2028-12-25',
+    "2028": [
+      "2028-01-17",
+      "2028-02-21",
+      "2028-04-14",
+      "2028-05-29",
+      "2028-06-19",
+      "2028-07-04",
+      "2028-09-04",
+      "2028-11-23",
+      "2028-12-25",
     ],
   },
 };
@@ -187,73 +201,73 @@ export function tradingDay(
   market: Market,
   calendar: CalendarConfig,
 ): { open: boolean; known: boolean; reason: string } {
-  if (market === 'CRYPTO')
-    return { open: true, known: true, reason: '全年可交易' };
+  if (market === "CRYPTO")
+    return { open: true, known: true, reason: "全年可交易" };
   const holidays = calendar[market][date.slice(0, 4)];
   if (!holidays)
-    return { open: false, known: false, reason: '该年度交易日历待更新' };
-  const dow = new Date(date + 'T12:00:00Z').getUTCDay();
+    return { open: false, known: false, reason: "该年度交易日历待更新" };
+  const dow = new Date(date + "T12:00:00Z").getUTCDay();
   if (dow === 0 || dow === 6)
-    return { open: false, known: true, reason: '周末休市' };
+    return { open: false, known: true, reason: "周末休市" };
   if (holidays.includes(date))
-    return { open: false, known: true, reason: '节假日休市' };
-  return { open: true, known: true, reason: '交易日' };
+    return { open: false, known: true, reason: "节假日休市" };
+  return { open: true, known: true, reason: "交易日" };
 }
 export function seedLedger(date = today()): Ledger {
   const accounts: Account[] = [
     {
-      id: 'spot-a',
-      name: '现货账户 A',
-      platform: '待设置平台',
-      category: 'crypto',
-      currency: 'USD',
+      id: "spot-a",
+      name: "现货账户 A",
+      platform: "待设置平台",
+      category: "crypto",
+      currency: "USD",
       archived: false,
-      note: '初始 1,200 USD 暂放在账户 A；可通过账户间转账调整分配。',
+      note: "初始 1,200 USD 暂放在账户 A；可通过账户间转账调整分配。",
     },
     {
-      id: 'spot-b',
-      name: '现货账户 B',
-      platform: '待设置平台',
-      category: 'crypto',
-      currency: 'USD',
+      id: "spot-b",
+      name: "现货账户 B",
+      platform: "待设置平台",
+      category: "crypto",
+      currency: "USD",
       archived: false,
-      note: '',
+      note: "",
     },
     {
-      id: 'spy',
-      name: 'SPY 长期定投',
-      platform: '美股账户',
-      category: 'stock',
-      currency: 'USD',
+      id: "spy",
+      name: "SPY 长期定投",
+      platform: "美股账户",
+      category: "stock",
+      currency: "USD",
       archived: false,
-      note: 'SPDR S&P 500 ETF Trust',
+      note: "SPDR S&P 500 ETF Trust",
     },
     {
-      id: 'grid',
-      name: 'Crypto 合约网格',
-      platform: '网格策略账户',
-      category: 'grid',
-      currency: 'USD',
+      id: "grid",
+      name: "Crypto 合约网格",
+      platform: "网格策略账户",
+      category: "grid",
+      currency: "USD",
       archived: false,
-      note: '用策略总权益更新估值；已包含在权益中的网格利润无需重复记收入。',
+      note: "用策略总权益更新估值；已包含在权益中的网格利润无需重复记收入。",
     },
     {
-      id: 'liquor',
-      name: '白酒指数基金',
-      platform: '基金账户',
-      category: 'fund',
-      currency: 'CNY',
+      id: "liquor",
+      name: "白酒指数基金",
+      platform: "基金账户",
+      category: "fund",
+      currency: "CNY",
       archived: false,
-      note: '可在名称中补充实际基金代码',
+      note: "可在名称中补充实际基金代码",
     },
     {
-      id: 'fund',
-      name: '我的基金',
-      platform: '基金账户',
-      category: 'fund',
-      currency: 'CNY',
+      id: "fund",
+      name: "我的基金",
+      platform: "基金账户",
+      category: "fund",
+      currency: "CNY",
       archived: false,
-      note: '',
+      note: "",
     },
   ];
   const plan = (
@@ -261,7 +275,7 @@ export function seedLedger(date = today()): Ledger {
     accountId: string,
     name: string,
     amount: number,
-    frequency: Plan['frequency'],
+    frequency: Plan["frequency"],
     market: Market,
     time: string,
   ): Plan => ({
@@ -281,47 +295,47 @@ export function seedLedger(date = today()): Ledger {
     accounts,
     entries: [
       {
-        id: 'opening-spot',
-        accountId: 'spot-a',
-        kind: 'deposit',
+        id: "opening-spot",
+        accountId: "spot-a",
+        kind: "deposit",
         amount: 1200,
         date,
         fx: 6.7157,
-        note: '初始本金；估值暂按本金，尚未录入实际收益',
-        createdAt: date + 'T00:00:00.000Z',
+        note: "初始本金；估值暂按本金，尚未录入实际收益",
+        createdAt: date + "T00:00:00.000Z",
       },
       {
-        id: 'opening-grid',
-        accountId: 'grid',
-        kind: 'deposit',
+        id: "opening-grid",
+        accountId: "grid",
+        kind: "deposit",
         amount: 20,
         date,
         fx: 6.7157,
-        note: '初始策略资金；请更新实际总权益',
-        createdAt: date + 'T00:00:01.000Z',
+        note: "初始策略资金；请更新实际总权益",
+        createdAt: date + "T00:00:01.000Z",
       },
     ],
     plans: [
       plan(
-        'p-crypto',
-        'spot-a',
-        'Crypto 现货定投',
+        "p-crypto",
+        "spot-a",
+        "Crypto 现货定投",
         60,
-        'monthly',
-        'CRYPTO',
-        '10:00',
+        "monthly",
+        "CRYPTO",
+        "10:00",
       ),
-      plan('p-spy', 'spy', 'SPY 月度定投', 100, 'monthly', 'US', '10:00'),
-      plan('p-liquor', 'liquor', '白酒交易日定投', 20, 'daily', 'CN', '14:00'),
-      plan('p-fund', 'fund', '基金交易日定投', 10, 'daily', 'CN', '14:00'),
+      plan("p-spy", "spy", "SPY 月度定投", 100, "monthly", "US", "10:00"),
+      plan("p-liquor", "liquor", "白酒交易日定投", 20, "daily", "CN", "14:00"),
+      plan("p-fund", "fund", "基金交易日定投", 10, "daily", "CN", "14:00"),
     ],
     journals: [],
     fxRates: [
-      { date: '2026-09-04', rate: 6.7157, source: 'Frankfurter · 参考汇率' },
+      { date: "2026-09-04", rate: 6.7157, source: "Frankfurter · 参考汇率" },
     ],
     calendar: structuredClone(defaultCalendar),
     skipped: [],
-    settings: { name: '我的投资空间', monthlyBudget: 2000, autoFx: true },
+    settings: { name: "我的投资空间", monthlyBudget: 2000, autoFx: true },
   };
 }
 export function fxAt(state: Ledger, date = today()): FxRate {
@@ -331,7 +345,7 @@ export function fxAt(state: Ledger, date = today()): FxRate {
   return sorted.filter((r) => r.date <= date).at(-1) ?? sorted[0];
 }
 export const convert = (v: number, from: Currency, to: Currency, fx: number) =>
-  from === to ? v : from === 'USD' ? v * fx : v / fx;
+  from === to ? v : from === "USD" ? v * fx : v / fx;
 export function sortedEntries(entries: Entry[]) {
   return [...entries].sort(
     (a, b) =>
@@ -340,41 +354,73 @@ export function sortedEntries(entries: Entry[]) {
       a.id.localeCompare(b.id),
   );
 }
-export function accountStats(state: Ledger, account: Account, end = today()) {
-  let value = 0,
-    invested = 0,
+// A bucket per holding plus an unallocated balance prevents double-counting.
+export function applyEntry(buckets: Map<string, number>, e: Entry) {
+  const key = e.accountId + ":" + (e.holdingId ?? "");
+  if (e.kind === "valuation" && !e.holdingId) {
+    let positions = 0;
+    for (const [k, v] of buckets)
+      if (k.startsWith(e.accountId + ":") && k !== key) positions += v;
+    buckets.set(key, round(e.amount - positions));
+  } else
+    buckets.set(
+      key,
+      round(
+        e.kind === "valuation"
+          ? e.amount
+          : (buckets.get(key) ?? 0) +
+              (["withdraw", "fee"].includes(e.kind) ? -e.amount : e.amount),
+      ),
+    );
+}
+export function accountStats(
+  state: Ledger,
+  account: Account,
+  end = today(),
+  holdingId?: string,
+) {
+  const buckets = new Map<string, number>();
+  let invested = 0,
     withdrawn = 0,
     fees = 0,
     income = 0;
   let marked: string | null = null;
+  const internal = new Set(
+    state.entries
+      .filter(
+        (e) =>
+          e.transferId &&
+          state.entries.some(
+            (x) =>
+              x.transferId === e.transferId &&
+              x.id !== e.id &&
+              x.accountId === e.accountId,
+          ),
+      )
+      .map((e) => e.transferId),
+  );
   for (const e of sortedEntries(
-    state.entries.filter((e) => e.accountId === account.id && e.date <= end),
+    state.entries.filter(
+      (e) =>
+        e.accountId === account.id &&
+        e.date <= end &&
+        (holdingId === undefined || e.holdingId === holdingId),
+    ),
   )) {
-    if (e.kind === 'deposit') {
-      value += e.amount;
-      invested += e.amount;
+    applyEntry(buckets, e);
+    if (holdingId !== undefined || !internal.has(e.transferId)) {
+      if (e.kind === "deposit") invested += e.amount;
+      if (e.kind === "withdraw") withdrawn += e.amount;
     }
-    if (e.kind === 'withdraw') {
-      value -= e.amount;
-      withdrawn += e.amount;
-    }
-    if (e.kind === 'income') {
-      value += e.amount;
-      income += e.amount;
-    }
-    if (e.kind === 'fee') {
-      value -= e.amount;
-      fees += e.amount;
-    }
-    if (e.kind === 'valuation') {
-      value = e.amount;
-      marked = e.date;
-    }
+    if (e.kind === "income") income += e.amount;
+    if (e.kind === "fee") fees += e.amount;
+    if (e.kind === "valuation") marked = e.date;
   }
+  const value = round([...buckets.values()].reduce((a, b) => a + b, 0));
   const net = round(invested - withdrawn),
     profit = round(value - net);
   return {
-    value: round(value),
+    value,
     invested: round(invested),
     withdrawn: round(withdrawn),
     net,
@@ -385,9 +431,101 @@ export function accountStats(state: Ledger, account: Account, end = today()) {
     marked,
   };
 }
+export function holdingStats(state: Ledger, holding: Holding, end = today()) {
+  return accountStats(
+    state,
+    state.accounts.find((a) => a.id === holding.accountId)!,
+    end,
+    holding.id,
+  );
+}
+export function unallocated(state: Ledger, account: Account, end = today()) {
+  return round(
+    accountStats(state, account, end).value -
+      (state.holdings ?? [])
+        .filter((h) => h.accountId === account.id)
+        .reduce((sum, h) => sum + holdingStats(state, h, end).value, 0),
+  );
+}
+export function roiValuation(
+  state: Ledger,
+  holding: Holding,
+  rate: number,
+  date = today(),
+): Entry {
+  if (!Number.isFinite(rate) || rate < -100 || rate > 100000)
+    throw Error("收益率需在 -100% 至 100000% 之间");
+  const stats = holdingStats(state, holding, date);
+  if (stats.invested <= 0) throw Error("请先向标的分配本金，再填写收益率");
+  const amount = round(stats.invested * (1 + rate / 100) - stats.withdrawn);
+  if (amount < 0) throw Error("此收益率与已取出金额冲突，计算后的估值不能为负");
+  return {
+    id: uid(),
+    accountId: holding.accountId,
+    holdingId: holding.id,
+    kind: "valuation",
+    amount,
+    date,
+    fx: fxAt(state, date).rate,
+    note: "手动填写累计投入收益率 " + rate + "%",
+    reportedRoi: rate,
+    createdAt: new Date(
+      Math.max(
+        Date.now(),
+        ...state.entries
+          .filter((e) => e.date === date)
+          .map((e) => Date.parse(e.createdAt) + 1),
+      ),
+    ).toISOString(),
+  };
+}
+export function allocateHolding(
+  state: Ledger,
+  holding: Holding,
+  amount: number,
+  source: "existing" | "new",
+  date = today(),
+): Entry[] {
+  if (!Number.isFinite(amount) || amount <= 0) throw Error("本金必须大于零");
+  const common = {
+    amount,
+    date,
+    fx: fxAt(state, date).rate,
+    note: "标的本金：" + holding.symbol,
+    createdAt: new Date().toISOString(),
+  };
+  if (source === "new")
+    return [
+      {
+        ...common,
+        id: uid(),
+        accountId: holding.accountId,
+        holdingId: holding.id,
+        kind: "deposit",
+      },
+    ];
+  const transferId = uid();
+  return [
+    {
+      ...common,
+      id: uid(),
+      accountId: holding.accountId,
+      kind: "withdraw",
+      transferId,
+    },
+    {
+      ...common,
+      id: uid(),
+      accountId: holding.accountId,
+      holdingId: holding.id,
+      kind: "deposit",
+      transferId,
+    },
+  ];
+}
 export function portfolio(
   state: Ledger,
-  currency: Currency = 'USD',
+  currency: Currency = "USD",
   end = today(),
 ) {
   const fx = fxAt(state, end).rate;
@@ -403,9 +541,9 @@ export function portfolio(
     withdrawn = 0;
   for (const e of state.entries.filter((e) => e.date <= end && !e.transferId)) {
     const a = state.accounts.find((a) => a.id === e.accountId)!;
-    if (e.kind === 'deposit')
+    if (e.kind === "deposit")
       invested += convert(e.amount, a.currency, currency, e.fx);
-    if (e.kind === 'withdraw')
+    if (e.kind === "withdraw")
       withdrawn += convert(e.amount, a.currency, currency, e.fx);
   }
   const net = invested - withdrawn,
@@ -424,13 +562,13 @@ export function portfolio(
 export function history(
   state: Ledger,
   currency: Currency,
-  days: number | 'all',
+  days: number | "all",
   end = today(),
 ) {
   const entries = sortedEntries(state.entries.filter((e) => e.date <= end));
   const first = entries[0]?.date ?? end;
   const start =
-    days === 'all' ? first : [first, addDays(end, -days + 1)].sort().at(-1)!;
+    days === "all" ? first : [first, addDays(end, -days + 1)].sort().at(-1)!;
   const dates = range(start, end);
   const step = Math.max(1, Math.ceil(dates.length / 366));
   const sample = dates.filter(
@@ -444,27 +582,24 @@ export function history(
     while (index < entries.length && entries[index].date <= date) {
       const e = entries[index++],
         a = accounts.get(e.accountId)!;
-      values.set(
-        a.id,
-        e.kind === 'valuation'
-          ? e.amount
-          : (values.get(a.id) ?? 0) +
-              (e.kind === 'withdraw' || e.kind === 'fee'
-                ? -e.amount
-                : e.amount),
-      );
-      if (!e.transferId && (e.kind === 'deposit' || e.kind === 'withdraw'))
+      applyEntry(values, e);
+      if (!e.transferId && (e.kind === "deposit" || e.kind === "withdraw"))
         net +=
           convert(e.amount, a.currency, currency, e.fx) *
-          (e.kind === 'withdraw' ? -1 : 1);
+          (e.kind === "withdraw" ? -1 : 1);
     }
     const fx = fxAt(state, date).rate;
     let value = 0;
     for (const [id, balance] of values)
-      value += convert(balance, accounts.get(id)!.currency, currency, fx);
+      value += convert(
+        balance,
+        accounts.get(id.split(":")[0])!.currency,
+        currency,
+        fx,
+      );
     return {
       date,
-      label: date.slice(5).replace('-', '/'),
+      label: date.slice(5).replace("-", "/"),
       value: round(value),
       net: round(net),
       profit: round(value - net),
@@ -491,19 +626,22 @@ export function scheduledDates(
   // Look back one month so month-end deferrals into the following month are included.
   const scan = [addDays(start, -32), plan.startDate].sort().at(-1)!;
   for (const date of range(scan, to)) {
-    const d = new Date(date + 'T12:00:00Z');
+    const d = new Date(date + "T12:00:00Z");
     const lastDay = new Date(
       Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0),
     ).getUTCDate();
     const matches =
-      plan.frequency === 'daily' ||
-      (plan.frequency === 'weekly' && d.getUTCDay() === plan.day % 7) ||
-      (plan.frequency === 'monthly' &&
+      plan.frequency === "daily" ||
+      (plan.frequency === "weekdays" &&
+        d.getUTCDay() > 0 &&
+        d.getUTCDay() < 6) ||
+      (plan.frequency === "weekly" && d.getUTCDay() === plan.day % 7) ||
+      (plan.frequency === "monthly" &&
         d.getUTCDate() === Math.min(plan.day, lastDay));
     if (!matches) continue;
     let due = date;
     let status = tradingDay(due, plan.market, calendar);
-    if (plan.frequency === 'daily') {
+    if (plan.frequency === "daily" || plan.frequency === "weekdays") {
       if (!status.open) continue;
     } else {
       for (let i = 0; i < 16 && status.known && !status.open; i++) {
@@ -524,9 +662,15 @@ export function occurrences(
   return state.plans
     .flatMap((plan) => {
       const account = state.accounts.find((a) => a.id === plan.accountId);
-      if (!account || account.archived) return [];
+      if (
+        !account ||
+        account.archived ||
+        (plan.holdingId &&
+          (state.holdings ?? []).find((h) => h.id === plan.holdingId)?.archived)
+      )
+        return [];
       return scheduledDates(plan, from, to, state.calendar).map((date) => {
-        const key = plan.id + ':' + date;
+        const key = plan.id + ":" + date;
         return {
           plan,
           account,
@@ -543,20 +687,20 @@ export function occurrences(
     );
 }
 export function isDue(o: Occurrence, now = new Date()) {
-  const zone = o.plan.market === 'US' ? 'America/New_York' : 'Asia/Shanghai';
+  const zone = o.plan.market === "US" ? "America/New_York" : "Asia/Shanghai";
   const localDate = today(zone, now);
-  const time = new Intl.DateTimeFormat('en-GB', {
+  const time = new Intl.DateTimeFormat("en-GB", {
     timeZone: zone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
   }).format(now);
   return o.date < localDate || (o.date === localDate && o.plan.time <= time);
 }
 export function nextOccurrence(
   state: Ledger,
   plan: Plan,
-  from = today(plan.market === 'US' ? 'America/New_York' : 'Asia/Shanghai'),
+  from = today(plan.market === "US" ? "America/New_York" : "Asia/Shanghai"),
 ) {
   return (
     occurrences(state, from, addDays(from, 65)).find(
@@ -566,100 +710,145 @@ export function nextOccurrence(
 }
 export function validDate(s: unknown): s is string {
   return (
-    typeof s === 'string' &&
+    typeof s === "string" &&
     /^\d{4}-\d{2}-\d{2}$/.test(s) &&
-    !Number.isNaN(Date.parse(s + 'T00:00:00Z')) &&
-    new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) === s
+    !Number.isNaN(Date.parse(s + "T00:00:00Z")) &&
+    new Date(s + "T00:00:00Z").toISOString().slice(0, 10) === s
   );
 }
 function assert(ok: unknown, msg: string): asserts ok {
   if (!ok) throw Error(msg);
 }
 function str(s: unknown, max = 200): s is string {
-  return typeof s === 'string' && s.length <= max;
+  return typeof s === "string" && s.length <= max;
 }
 function num(v: unknown, min = 0, max = 1e12): v is number {
-  return typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+  return typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
 }
 export function validateLedger(input: unknown): Ledger {
-  assert(input && typeof input === 'object', '账本格式无效');
+  assert(input && typeof input === "object", "账本格式无效");
   const s = input as Ledger;
-  assert(s.version === 1, '不支持此账本版本');
+  assert(s.version === 1, "不支持此账本版本");
   assert(
     Array.isArray(s.accounts) && s.accounts.length <= 100,
-    '账户最多 100 个',
+    "账户最多 100 个",
   );
   assert(
     Array.isArray(s.entries) && s.entries.length <= 10000,
-    '流水最多 10,000 条',
+    "流水最多 10,000 条",
   );
-  assert(Array.isArray(s.plans) && s.plans.length <= 100, '计划最多 100 个');
+  assert(Array.isArray(s.plans) && s.plans.length <= 100, "计划最多 100 个");
   assert(
     Array.isArray(s.journals) && s.journals.length <= 5000,
-    '手记格式无效',
+    "手记格式无效",
   );
   const ids = new Set<string>();
   for (const a of s.accounts) {
-    assert(str(a.id, 100) && a.id.length > 0 && !ids.has(a.id), '账户编号重复');
+    assert(
+      str(a.id, 100) &&
+        a.id.length > 0 &&
+        !a.id.includes(":") &&
+        !ids.has(a.id),
+      "账户编号重复",
+    );
     ids.add(a.id);
     assert(
       str(a.name, 80) &&
         a.name.trim().length > 0 &&
         str(a.platform, 80) &&
         str(a.note, 2000),
-      '账户信息无效',
+      "账户信息无效",
     );
     assert(
       Object.hasOwn(categories, a.category) &&
-        ['USD', 'CNY'].includes(a.currency) &&
-        typeof a.archived === 'boolean',
-      '账户类型无效',
+        ["USD", "CNY"].includes(a.currency) &&
+        typeof a.archived === "boolean",
+      "账户类型无效",
     );
     assert(
-      a.currency === (a.category === 'fund' ? 'CNY' : 'USD'),
-      'Crypto、美股使用 USD；基金使用 CNY',
+      a.currency === (a.category === "fund" ? "CNY" : "USD"),
+      "Crypto、美股使用 USD；基金使用 CNY",
     );
+  }
+  assert(
+    s.holdings === undefined ||
+      (Array.isArray(s.holdings) && s.holdings.length <= 500),
+    "标的最多 500 个",
+  );
+  const holdingIds = new Set<string>();
+  for (const h of s.holdings ?? []) {
+    assert(
+      str(h.id, 100) &&
+        h.id.length > 0 &&
+        !h.id.includes(":") &&
+        !holdingIds.has(h.id) &&
+        ids.has(h.accountId) &&
+        str(h.symbol, 30) &&
+        h.symbol.trim().length > 0 &&
+        str(h.name, 80) &&
+        h.name.trim().length > 0 &&
+        typeof h.archived === "boolean",
+      "标的信息无效",
+    );
+    holdingIds.add(h.id);
   }
   const entryIds = new Set<string>(),
     keys = new Set<string>();
   for (const e of s.entries) {
     assert(
       str(e.id, 100) && e.id.length > 0 && !entryIds.has(e.id),
-      '流水编号重复',
+      "流水编号重复",
     );
     entryIds.add(e.id);
     assert(
       ids.has(e.accountId) && Object.hasOwn(kinds, e.kind),
-      '流水账户或类型无效',
+      "流水账户或类型无效",
     );
     assert(
       num(e.amount) &&
-        (e.kind === 'valuation' || e.amount > 0) &&
+        (e.kind === "valuation" || e.amount > 0) &&
         num(e.fx, 0.01, 1000),
-      '金额和汇率必须为有效正数',
+      "金额和汇率必须为有效正数",
     );
     assert(
-      validDate(e.date) && e.date <= today() && e.date >= '2000-01-01',
-      '记账日期必须在 2000 年至今天之间',
+      validDate(e.date) && e.date <= today() && e.date >= "2000-01-01",
+      "记账日期必须在 2000 年至今天之间",
     );
     assert(
       str(e.note, 2000) &&
         str(e.createdAt, 40) &&
         /^\d{4}-\d{2}-\d{2}T/.test(e.createdAt) &&
         Number.isFinite(Date.parse(e.createdAt)),
-      '流水信息无效',
+      "流水信息无效",
     );
+    if (e.holdingId)
+      assert(
+        holdingIds.has(e.holdingId) &&
+          (s.holdings ?? []).find((h) => h.id === e.holdingId)?.accountId ===
+            e.accountId,
+        "标的必须属于所选账户",
+      );
+    if (e.reportedRoi !== undefined)
+      assert(
+        num(e.reportedRoi, -100, 100000) && e.kind === "valuation",
+        "手动收益率格式无效",
+      );
+    if (e.automatic !== undefined)
+      assert(
+        typeof e.automatic === "boolean" && !!e.planKey,
+        "自动流水格式无效",
+      );
     if (e.planKey) {
       assert(
-        str(e.planKey, 150) && !keys.has(e.planKey) && e.kind === 'deposit',
-        '定投不可重复确认',
+        str(e.planKey, 150) && !keys.has(e.planKey) && e.kind === "deposit",
+        "定投不可重复确认",
       );
       keys.add(e.planKey);
     }
     if (e.transferId)
       assert(
-        str(e.transferId, 100) && ['deposit', 'withdraw'].includes(e.kind),
-        '转账格式错误',
+        str(e.transferId, 100) && ["deposit", "withdraw"].includes(e.kind),
+        "转账格式错误",
       );
   }
   for (const transferId of new Set(
@@ -669,30 +858,31 @@ export function validateLedger(input: unknown): Ledger {
     assert(
       legs.length === 2 &&
         legs[0].kind !== legs[1].kind &&
-        legs[0].accountId !== legs[1].accountId &&
+        (legs[0].accountId !== legs[1].accountId ||
+          legs[0].holdingId !== legs[1].holdingId) &&
         legs[0].amount === legs[1].amount &&
         legs[0].date === legs[1].date &&
         legs[0].fx === legs[1].fx &&
         s.accounts.find((a) => a.id === legs[0].accountId)?.currency ===
           s.accounts.find((a) => a.id === legs[1].accountId)?.currency,
-      '转账必须包含同币种、同金额、同日期的两笔流水',
+      "转账必须包含同币种、同金额、同日期的两笔流水",
     );
   }
   const balances = new Map<string, number>();
+  // Transfer pairs can share a timestamp; replay withdrawals before deposits is safe as buckets are distinct.
   for (const e of sortedEntries(s.entries)) {
-    const value =
-      e.kind === 'valuation'
-        ? e.amount
-        : (balances.get(e.accountId) ?? 0) +
-          (['withdraw', 'fee'].includes(e.kind) ? -e.amount : e.amount);
-    assert(value >= -0.000001, '取出或费用超过该日账户余额，请先核对历史流水');
-    balances.set(e.accountId, round(value));
+    applyEntry(balances, e);
+    const value = balances.get(e.accountId + ":" + (e.holdingId ?? "")) ?? 0;
+    assert(
+      value >= -0.000001,
+      "取出、分配或费用超过该日可用余额；账户整体估值不能低于标的估值合计",
+    );
   }
   const plans = new Set<string>();
   for (const p of s.plans) {
     assert(
       str(p.id, 100) && p.id.length > 0 && !plans.has(p.id),
-      '计划编号重复',
+      "计划编号重复",
     );
     plans.add(p.id);
     assert(
@@ -700,29 +890,40 @@ export function validateLedger(input: unknown): Ledger {
         str(p.name, 80) &&
         p.name.trim().length > 0 &&
         num(p.amount, 0.01) &&
-        ['daily', 'weekly', 'monthly'].includes(p.frequency) &&
-        ['CRYPTO', 'CN', 'US'].includes(p.market) &&
-        typeof p.paused === 'boolean',
-      '定投信息无效',
+        ["daily", "weekdays", "weekly", "monthly"].includes(p.frequency) &&
+        ["CRYPTO", "CN", "US"].includes(p.market) &&
+        typeof p.paused === "boolean",
+      "定投信息无效",
     );
+    if (p.mode !== undefined)
+      assert(["auto", "manual"].includes(p.mode), "记账方式无效");
+    if (p.autoFrom !== undefined)
+      assert(validDate(p.autoFrom), "自动开始日期无效");
+    if (p.holdingId)
+      assert(
+        holdingIds.has(p.holdingId) &&
+          (s.holdings ?? []).find((h) => h.id === p.holdingId)?.accountId ===
+            p.accountId,
+        "定投标的必须属于所选账户",
+      );
     const a = s.accounts.find((a) => a.id === p.accountId)!;
     assert(
       p.market ===
-        (a.category === 'fund'
-          ? 'CN'
-          : a.category === 'stock'
-            ? 'US'
-            : 'CRYPTO'),
-      '市场必须与账户资产类型一致',
+        (a.category === "fund"
+          ? "CN"
+          : a.category === "stock"
+            ? "US"
+            : "CRYPTO"),
+      "市场必须与账户资产类型一致",
     );
     assert(
       Number.isInteger(p.day) &&
         p.day >= 1 &&
-        p.day <= (p.frequency === 'weekly' ? 7 : 31) &&
+        p.day <= (p.frequency === "weekly" ? 7 : 31) &&
         validDate(p.startDate) &&
-        p.startDate >= '2000-01-01' &&
+        p.startDate >= "2000-01-01" &&
         /^([01]\d|2[0-3]):[0-5]\d$/.test(p.time),
-      '定投日期或时间无效',
+      "定投日期或时间无效",
     );
   }
   const journals = new Set<string>();
@@ -736,7 +937,7 @@ export function validateLedger(input: unknown): Ledger {
         j.title.trim().length > 0 &&
         str(j.body, 10000) &&
         str(j.tag, 30),
-      '手记格式无效',
+      "手记格式无效",
     );
     journals.add(j.id);
   }
@@ -744,7 +945,7 @@ export function validateLedger(input: unknown): Ledger {
     Array.isArray(s.fxRates) &&
       s.fxRates.length > 0 &&
       s.fxRates.length <= 10000,
-    '至少保留一个有效汇率',
+    "至少保留一个有效汇率",
   );
   const fxDates = new Set<string>();
   for (const r of s.fxRates) {
@@ -754,17 +955,17 @@ export function validateLedger(input: unknown): Ledger {
         num(r.rate, 0.01, 1000) &&
         str(r.source, 100) &&
         !fxDates.has(r.date),
-      '汇率记录无效或日期重复',
+      "汇率记录无效或日期重复",
     );
     fxDates.add(r.date);
   }
-  assert(s.calendar && typeof s.calendar === 'object', '缺少交易日历');
-  for (const m of ['CN', 'US'] as const) {
+  assert(s.calendar && typeof s.calendar === "object", "缺少交易日历");
+  for (const m of ["CN", "US"] as const) {
     assert(
       s.calendar[m] &&
-        typeof s.calendar[m] === 'object' &&
+        typeof s.calendar[m] === "object" &&
         !Array.isArray(s.calendar[m]),
-      '交易日历无效',
+      "交易日历无效",
     );
     for (const [year, dates] of Object.entries(s.calendar[m]))
       assert(
@@ -772,22 +973,22 @@ export function validateLedger(input: unknown): Ledger {
           Array.isArray(dates) &&
           dates.length <= 366 &&
           dates.every((d) => validDate(d) && d.startsWith(year)),
-        '休市日期必须与年份相符',
+        "休市日期必须与年份相符",
       );
   }
   assert(
     Array.isArray(s.skipped) &&
       s.skipped.length <= 10000 &&
       s.skipped.every((k) => str(k, 150)),
-    '跳过记录无效',
+    "跳过记录无效",
   );
   assert(
     s.settings &&
       str(s.settings.name, 80) &&
       s.settings.name.trim().length > 0 &&
       num(s.settings.monthlyBudget, 0) &&
-      typeof s.settings.autoFx === 'boolean',
-    '设置无效',
+      typeof s.settings.autoFx === "boolean",
+    "设置无效",
   );
   return s;
 }
