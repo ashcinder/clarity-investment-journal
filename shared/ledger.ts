@@ -1,8 +1,11 @@
+import { validAccountImage } from "./account-image.ts";
+
 export type Currency = "USD" | "CNY";
 export type Category = "crypto" | "stock" | "grid" | "fund";
 export type Market = "CRYPTO" | "CN" | "US";
 export type EntryKind = "deposit" | "withdraw" | "valuation" | "income" | "fee";
 export type Account = {
+  image?: string;
   id: string;
   name: string;
   platform: string;
@@ -782,6 +785,10 @@ export function validateLedger(input: unknown): Ledger {
       "账户编号重复",
     );
     ids.add(a.id);
+    assert(
+      a.image === undefined || validAccountImage(a.image),
+      "账户图片无效，请重新上传 PNG、JPG 或 WebP 缩略图",
+    );
     assert(
       str(a.name, 80) &&
         a.name.trim().length > 0 &&

@@ -2523,3 +2523,58 @@ h1 > span {
     flex-direction: column;
   }
 }
+
+/* Account identity uses the same icon footprint in cards, schedules and history. */
+.account-image {
+  object-fit: contain;
+  flex-shrink: 0;
+  background: #f4f8f7;
+  border: 1px solid #e3ece9;
+}
+.account-image-editor {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid #e3ece9;
+  border-radius: 12px;
+  background: #f7faf9;
+}
+.account-image-preview .asset-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  font-size: 32px;
+}
+.account-image-controls {
+  min-width: 0;
+}
+.account-image-controls strong {
+  font-size: 13px;
+  color: #233e49;
+}
+.account-image-controls p {
+  font-size: 11px;
+  color: #74898e;
+  line-height: 1.7;
+  margin: 5px 0 10px;
+}
+.account-image-actions {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.account-image-controls .form-error {
+  color: #b54747;
+}
+@media (max-width: 480px) {
+  .account-image-editor {
+    align-items: flex-start;
+    padding: 14px;
+    gap: 12px;
+  }
+  .account-image-preview .asset-icon {
+    width: 54px;
+    height: 54px;
+    border-radius: 14px;
+  }
+}

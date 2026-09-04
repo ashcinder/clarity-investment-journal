@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recordPosition, today } from "../shared/ledger.ts";
 test("separate frontend and backend proxy API, persist SQLite and support safe reset", async () => {
+  const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
   const dir = await mkdtemp(join(tmpdir(), "clarity-test-"));
   const origin = "http://127.0.0.1:44318";
   let child;
@@ -78,6 +79,7 @@ test("separate frontend and backend proxy API, persist SQLite and support safe r
     assert.equal(d.state.entries.length, 0);
     d.state.accounts.push({
       id: "a",
+      image,
       name: "账户",
       category: "crypto",
       currency: "USD",
@@ -146,6 +148,19 @@ test("separate frontend and backend proxy API, persist SQLite and support safe r
     await start();
     d = await get();
     assert.equal(d.state.entries[0].quantitySet, 0.02);
+    assert.equal(d.state.accounts[0].image, image);
+    const bad = structuredClone(d);
+    bad.state.accounts[0].image = "https://example.com/image.svg";
+    assert.equal((await send("/api/ledger", "PUT", bad)).status, 400);
+    delete d.state.accounts[0].image;
+    res = await send("/api/ledger", "PUT", d);
+    assert.equal(res.status, 200);
+    d = await get();
+    assert.equal(d.state.accounts[0].image, undefined);
+    d.state.accounts[0].image = image;
+    res = await send("/api/ledger", "PUT", d);
+    assert.equal(res.status, 200);
+    d = await get();
     res = await send("/api/reset", "POST", {
       revision: d.revision,
       confirmation: "清空",
@@ -155,6 +170,7 @@ test("separate frontend and backend proxy API, persist SQLite and support safe r
     d = await get();
     assert.equal(d.state.entries.length, 0);
     assert.equal(d.state.accounts.length, 1);
+    assert.equal(d.state.accounts[0].image, image);
     assert.equal(d.state.plans.length, 0);
     res = await send("/api/reset", "POST", {
       revision: d.revision,

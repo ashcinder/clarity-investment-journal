@@ -43,6 +43,7 @@ import {
   NotebookPen,
   SlidersHorizontal,
 } from "lucide-react";
+import { prepareAccountImage } from "@/lib/account-image";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -110,7 +111,12 @@ const AllocationChart = lazy(() =>
   import("./portfolio-charts").then((m) => ({ default: m.AllocationChart })),
 );
 type Tab =
-  "overview" | "accounts" | "plans" | "journal" | "analysis" | "settings";
+  | "overview"
+  | "accounts"
+  | "plans"
+  | "journal"
+  | "analysis"
+  | "settings";
 const navigation = [
   { id: "overview", label: "资产总览", icon: LayoutDashboard },
   { id: "accounts", label: "账户与资产", icon: Wallet },
@@ -213,6 +219,27 @@ function AssetIcon({ category }: { category: Category }) {
     >
       {c.symbol}
     </span>
+  );
+}
+function AccountIcon({
+  account,
+}: {
+  account: Pick<Account, "category" | "image">;
+}) {
+  const [failedImage, setFailedImage] = useState<string>();
+  return account.image && failedImage !== account.image ? (
+    // Already compressed to a <= 12 KB inline icon; also runs in standalone Vite.
+    // oxlint-disable-next-line next/no-img-element
+    <img
+      className="asset-icon account-image"
+      src={account.image}
+      alt=""
+      width={35}
+      height={35}
+      onError={() => setFailedImage(account.image)}
+    />
+  ) : (
+    <AssetIcon category={account.category} />
   );
 }
 function DownloadFile(name: string, data: string, type: string) {
@@ -997,7 +1024,7 @@ export default function InvestmentApp() {
                       <div className="upcoming-list">
                         {upcoming.slice(0, 4).map((o) => (
                           <div className="upcoming-item" key={o.key}>
-                            <AssetIcon category={o.account.category} />
+                            <AccountIcon account={o.account} />
                             <div className="grow">
                               <b>{o.plan.name}</b>
                               <small>
@@ -1137,7 +1164,7 @@ export default function InvestmentApp() {
                           key={a.id}
                         >
                           <div className="account-heading">
-                            <AssetIcon category={a.category} />
+                            <AccountIcon account={a} />
                             <div className="grow">
                               <h3>{a.name}</h3>
                               <small>
@@ -1526,7 +1553,7 @@ export default function InvestmentApp() {
                         .map((o) => (
                           <div className="agenda-item" key={o.key}>
                             <div className="row">
-                              <AssetIcon category={o.account.category} />
+                              <AccountIcon account={o.account} />
                               <div>
                                 <b>{o.plan.name}</b>
                                 <small>
@@ -1683,7 +1710,7 @@ export default function InvestmentApp() {
                     return (
                       <section className="panel plan-card" key={p.id}>
                         <div className="row">
-                          <AssetIcon category={a.category} />
+                          <AccountIcon account={a} />
                           <div className="grow">
                             <h3>{p.name}</h3>
                             <small>
@@ -1871,7 +1898,7 @@ export default function InvestmentApp() {
                                     <TableRow key={e.id}>
                                       <TableCell>
                                         <div className="row">
-                                          <AssetIcon category={a.category} />
+                                          <AccountIcon account={a} />
                                           <div>
                                             <strong>{a.name}</strong>
                                             <small>
@@ -2834,16 +2861,23 @@ function AccountForm({
     account?.category ?? "crypto",
   );
   const [note, setNote] = useState(account?.note ?? "");
+  const [image, setImage] = useState(account?.image);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
+  const imageJob = useRef(false);
   const hasHistory =
     !!account &&
     (state.entries.some((e) => e.accountId === account.id) ||
       state.plans.some((p) => p.accountId === account.id));
   return (
     <FormShell
-      busy={busy}
+      busy={busy || imageBusy}
       label="保存账户"
-      onSubmit={() =>
-        onSubmit({
+      onSubmit={() => {
+        if (imageJob.current)
+          return Promise.reject(new Error("图片正在处理，请稍等。"));
+        return onSubmit({
           id: account?.id ?? uid(),
           name: name.trim(),
           platform: platform.trim(),
@@ -2851,8 +2885,9 @@ function AccountForm({
           currency: category === "fund" ? "CNY" : "USD",
           archived: account?.archived ?? false,
           note,
-        })
-      }
+          ...(image ? { image } : {}),
+        });
+      }}
       footer={
         <div className="row">
           {onArchive && !account?.archived && (
@@ -2880,6 +2915,80 @@ function AccountForm({
         </div>
       }
     >
+      <div className="account-image-editor field-wide">
+        <div className="account-image-preview">
+          <AccountIcon account={{ category, image }} />
+        </div>
+        <div className="account-image-controls">
+          <strong>账户图片</strong>
+          <p id="account-image-hint">
+            PNG、JPG 或 WebP，最大 5 MB。完整保留图片内容，自动缩小。
+          </p>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            aria-label="选择账户图片"
+            aria-describedby="account-image-hint"
+            hidden
+            disabled={busy || imageBusy}
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (!file || imageJob.current) return;
+              imageJob.current = true;
+              setImageBusy(true);
+              setImageError("");
+              try {
+                setImage(await prepareAccountImage(file));
+              } catch (error) {
+                setImageError(errorText(error));
+              } finally {
+                imageJob.current = false;
+                setImageBusy(false);
+              }
+            }}
+          />
+          <div className="row account-image-actions">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy || imageBusy}
+              onClick={() => fileInput.current?.click()}
+            >
+              <Upload size={14} />
+              {imageBusy ? "正在处理…" : image ? "更换图片" : "上传图片"}
+            </Button>
+            {image && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={busy || imageBusy}
+                onClick={() => {
+                  setImage(undefined);
+                  setImageError("");
+                }}
+              >
+                恢复默认图标
+              </Button>
+            )}
+          </div>
+          {imageError && (
+            <p role="alert" className="form-error">
+              {imageError}
+            </p>
+          )}
+          <output className="sr-only">
+            {imageBusy
+              ? "正在处理图片"
+              : image
+                ? "图片已准备好，保存账户后生效"
+                : "使用默认图标"}
+          </output>
+        </div>
+      </div>
       <Field label="账户名称" wide>
         <Input
           maxLength={80}
@@ -4082,7 +4191,7 @@ function AccountDetail({
       </div>
       <section className="panel detail-summary">
         <div className="detail-identity">
-          <AssetIcon category={account.category} />
+          <AccountIcon account={account} />
           <div>
             <span>
               {account.platform || "个人账户"} · {account.currency}
