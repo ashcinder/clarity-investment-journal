@@ -13,6 +13,7 @@ import {
   history,
   validateLedger,
   scheduledDates,
+  planAccountAmount,
 } from "../lib/ledger.ts";
 import {
   materializeAutomatic,
@@ -191,14 +192,14 @@ test("automatic deposits target the correct holding and manual plans do not auto
     0,
   );
 });
-test("New York execution time respects daylight saving", () => {
+test("US plans execute at the same Beijing time throughout the year", () => {
   assert.equal(
     scheduledInstant("2026-09-04", plan({ market: "US", time: "10:00" })),
-    "2026-09-04T14:00:00.000Z",
+    "2026-09-04T02:00:00.000Z",
   );
   assert.equal(
     scheduledInstant("2026-01-05", plan({ market: "US", time: "10:00" })),
-    "2026-01-05T15:00:00.000Z",
+    "2026-01-05T02:00:00.000Z",
   );
 });
 
@@ -299,4 +300,84 @@ test("deletion corrects later whole-account valuations so removed assets never r
   validateLedger(s);
   assert.equal(accountStats(s, s.accounts[0]).value, 1190);
   assert.equal(history(s, "USD", "all", date).at(-1).value, 1210);
+});
+
+test("CNY plans fund USD accounts using each occurrence date rate", () => {
+  const s = fixture();
+  s.fxRates = [
+    { date: "2026-09-01", rate: 7, source: "test" },
+    { date: "2026-09-04", rate: 8, source: "test" },
+  ];
+  s.plans = [
+    plan({
+      currency: "CNY",
+      amount: 56,
+      startDate: "2026-09-03",
+      autoFrom: "2026-09-03",
+    }),
+  ];
+  const result = materializeAutomatic(s, new Date("2026-09-04T10:00:00Z"));
+  const entries = result.state.entries.filter((e) => e.automatic);
+  assert.deepEqual(
+    entries.map((e) => e.amount),
+    [8, 7],
+  );
+  assert.deepEqual(
+    entries.map((e) => e.fx),
+    [7, 8],
+  );
+  assert.equal(result.state.plans[0].currency, "CNY");
+  assert.equal(planAccountAmount(s, s.plans[0], "2026-09-03"), 8);
+  assert.equal(
+    materializeAutomatic(result.state, new Date("2026-09-04T10:00:00Z")).added,
+    0,
+  );
+});
+test("USD plans fund CNY accounts without changing their native currency", () => {
+  const s = fixture();
+  s.fxRates = [{ date: "2026-09-01", rate: 7, source: "test" }];
+  s.plans = [
+    plan({
+      currency: "USD",
+      accountId: "liquor",
+      market: "CN",
+      amount: 20,
+      startDate: date,
+      autoFrom: date,
+    }),
+  ];
+  const result = materializeAutomatic(s, new Date("2026-09-04T10:00:00Z"));
+  assert.equal(result.state.entries.find((e) => e.automatic).amount, 140);
+  assert.equal(
+    result.state.accounts.find((a) => a.id === "liquor").currency,
+    "CNY",
+  );
+});
+test("Beijing midnight determines the US plan execution date", () => {
+  const s = fixture();
+  s.plans = [
+    plan({
+      accountId: "spy",
+      market: "US",
+      time: "00:01",
+      startDate: date,
+      autoFrom: date,
+    }),
+  ];
+  assert.equal(
+    materializeAutomatic(s, new Date("2026-09-03T16:00:00Z")).added,
+    0,
+  );
+  const result = materializeAutomatic(s, new Date("2026-09-03T16:01:00Z"));
+  assert.equal(result.added, 1);
+  const entry = result.state.entries.find((e) => e.automatic);
+  assert.equal(entry.date, date);
+  assert.equal(entry.createdAt, "2026-09-03T16:01:00.000Z");
+});
+test("old plan currency falls back to account currency and unsupported units are rejected", () => {
+  const s = fixture();
+  s.plans = [plan({ amount: 20 })];
+  assert.equal(planAccountAmount(s, s.plans[0], date), 20);
+  s.plans[0].currency = "EUR";
+  assert.throws(() => validateLedger(s), /币种/);
 });

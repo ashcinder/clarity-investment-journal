@@ -71,6 +71,7 @@ import {
   addDays,
   range,
   accountStats,
+  planAccountAmount,
   holdingStats,
   updateHoldingAmounts,
   deleteHolding,
@@ -141,7 +142,7 @@ type ServerData = {
   updatedAt: string;
   autoAdded?: number;
 };
-const tzLabel = (p: Plan) => (p.market === "US" ? "纽约时间" : "北京时间");
+const tzLabel = () => "北京时间";
 const frequency = (p: Plan) =>
   p.frequency === "daily"
     ? p.market === "CRYPTO"
@@ -988,11 +989,14 @@ export default function InvestmentApp() {
                               <b>{o.plan.name}</b>
                               <small>
                                 {o.date.slice(5).replace("-", "月")}日 ·{" "}
-                                {o.plan.time} {tzLabel(o.plan)}
+                                {o.plan.time} {tzLabel()}
                               </small>
                             </div>
                             <strong>
-                              {money(o.plan.amount, o.account.currency)}
+                              {money(
+                                o.plan.amount,
+                                o.plan.currency ?? o.account.currency,
+                              )}
                             </strong>
                             <Button
                               size="sm"
@@ -1305,7 +1309,7 @@ export default function InvestmentApp() {
                               sum +
                               convert(
                                 o.plan.amount,
-                                o.account.currency,
+                                o.plan.currency ?? o.account.currency,
                                 "CNY",
                                 fxAt(s).rate,
                               ),
@@ -1321,7 +1325,7 @@ export default function InvestmentApp() {
                                 sum +
                                 convert(
                                   o.plan.amount,
-                                  o.account.currency,
+                                  o.plan.currency ?? o.account.currency,
                                   "USD",
                                   fxAt(s).rate,
                                 ),
@@ -1475,7 +1479,7 @@ export default function InvestmentApp() {
                         基金
                       </span>
                       <small>
-                        休市标记为中国市场；美股日期按纽约当地日历。
+                        休市标记为中国市场；所有定投均按北京时间执行，交易日期按对应市场日历判断。
                       </small>
                     </div>
                     {!s.calendar.CN[month.slice(0, 4)] && (
@@ -1507,12 +1511,15 @@ export default function InvestmentApp() {
                               <div>
                                 <b>{o.plan.name}</b>
                                 <small>
-                                  {o.plan.time} · {tzLabel(o.plan)}
+                                  {o.plan.time} · {tzLabel()}
                                 </small>
                               </div>
                             </div>
                             <div className="agenda-amount">
-                              {money(o.plan.amount, o.account.currency)}
+                              {money(
+                                o.plan.amount,
+                                o.plan.currency ?? o.account.currency,
+                              )}
                               <span>
                                 {o.done
                                   ? "已记录"
@@ -1605,11 +1612,14 @@ export default function InvestmentApp() {
                           <div className="grow">
                             <b>{o.plan.name}</b>
                             <small>
-                              {o.date} · {o.plan.time} {tzLabel(o.plan)}
+                              {o.date} · {o.plan.time} {tzLabel()}
                             </small>
                           </div>
                           <strong>
-                            {money(o.plan.amount, o.account.currency)}
+                            {money(
+                              o.plan.amount,
+                              o.plan.currency ?? o.account.currency,
+                            )}
                           </strong>
                           <Button
                             variant="outline"
@@ -1677,11 +1687,11 @@ export default function InvestmentApp() {
                           </span>
                         </div>
                         <strong className="plan-amount">
-                          {money(p.amount, a.currency)}
+                          {money(p.amount, p.currency ?? a.currency)}
                           <small>/ {frequency(p)}</small>
                         </strong>
                         <p>
-                          {p.time} · {tzLabel(p)} ·{" "}
+                          {p.time} · {tzLabel()} ·{" "}
                           {p.market === "CRYPTO"
                             ? "全年可交易"
                             : p.market === "CN"
@@ -1716,11 +1726,7 @@ export default function InvestmentApp() {
                                   if (p.paused)
                                     s.plans.find(
                                       (x) => x.id === p.id,
-                                    )!.autoFrom = today(
-                                      p.market === "US"
-                                        ? "America/New_York"
-                                        : "Asia/Shanghai",
-                                    );
+                                    )!.autoFrom = today();
                                 },
                                 p.paused ? "定投已恢复" : "定投已暂停",
                               ).catch((e) => setNotice(errorText(e)))
@@ -2573,12 +2579,20 @@ function EntryForm({
   );
   const [kind, setKind] = useState<EntryKind>(entry?.kind ?? "deposit");
   const [amount, setAmount] = useState(
-    String(entry?.amount ?? occurrence?.plan.amount ?? ""),
+    String(
+      entry?.amount ??
+        (occurrence
+          ? planAccountAmount(state, occurrence.plan, occurrence.date)
+          : ""),
+    ),
   );
   const [date, setDate] = useState(entry?.date ?? occurrence?.date ?? today());
   const [fx, setFx] = useState(String(entry?.fx ?? fxAt(state, date).rate));
   const [note, setNote] = useState(
-    entry?.note ?? (occurrence ? `定投：${occurrence.plan.name}` : ""),
+    entry?.note ??
+      (occurrence
+        ? `定投：${occurrence.plan.name} · ${money(occurrence.plan.amount, occurrence.plan.currency ?? state.accounts.find((a) => a.id === occurrence.plan.accountId)!.currency)}（北京时间）`
+        : ""),
   );
   const account = state.accounts.find((a) => a.id === aid);
   const locked = !!occurrence || !!entry?.planKey;
@@ -2856,6 +2870,15 @@ function PlanForm({
   );
   const [holdingId, setHoldingId] = useState(plan?.holdingId ?? "");
   const [mode, setMode] = useState<"auto" | "manual">(plan?.mode ?? "auto");
+  const [planCurrency, setPlanCurrency] = useState<Currency>(
+    plan?.currency ??
+      state.accounts.find(
+        (a) =>
+          a.id ===
+          (plan?.accountId ?? state.accounts.find((a) => !a.archived)?.id),
+      )?.currency ??
+      "USD",
+  );
   const [name, setName] = useState(plan?.name ?? "");
   const [amount, setAmount] = useState(String(plan?.amount ?? ""));
   const [freq, setFreq] = useState<Plan["frequency"]>(
@@ -2878,14 +2901,8 @@ function PlanForm({
           accountId: aid,
           ...(holdingId ? { holdingId } : {}),
           mode,
-          autoFrom: plan
-            ? [
-                start,
-                today(market === "US" ? "America/New_York" : "Asia/Shanghai"),
-              ]
-                .sort()
-                .at(-1)!
-            : start,
+          currency: planCurrency,
+          autoFrom: plan ? [start, today()].sort().at(-1)! : start,
           name: name.trim(),
           amount: Number(amount),
           frequency: freq,
@@ -2943,7 +2960,16 @@ function PlanForm({
           <option value="manual">手动确认 · 按实际金额记账</option>
         </NativeSelect>
       </Field>
-      <Field label={`每次投入（${a?.currency ?? "USD"}）`}>
+      <Field label="定投币种">
+        <NativeSelect
+          value={planCurrency}
+          onChange={(e) => setPlanCurrency(e.target.value as Currency)}
+        >
+          <option value="USD">USD · 美元</option>
+          <option value="CNY">CNY · 人民币</option>
+        </NativeSelect>
+      </Field>
+      <Field label={`每次投入（${planCurrency}）`}>
         <Input
           type="number"
           min="0.01"
@@ -2986,7 +3012,7 @@ function PlanForm({
           </NativeSelect>
         </Field>
       )}
-      <Field label={`执行时间 · ${market === "US" ? "纽约时间" : "北京时间"}`}>
+      <Field label="执行时间 · 北京时间">
         <Input
           type="time"
           value={time}
@@ -3003,7 +3029,25 @@ function PlanForm({
           required
         />
       </Field>
+      {a && planCurrency !== a.currency && (
+        <div className="form-tip field-wide">
+          账户以 {a.currency} 记账，每笔{" "}
+          {money(Number(amount) || 0, planCurrency)}{" "}
+          将按当日账本汇率换算。目前约为{" "}
+          {money(
+            convert(
+              Number(amount) || 0,
+              planCurrency,
+              a.currency,
+              fxAt(state).rate,
+            ),
+            a.currency,
+          )}
+          。
+        </div>
+      )}
       <div className="form-tip field-wide">
+        所有执行时间均为北京时间（UTC+8）。
         {market === "CRYPTO"
           ? "Crypto 每天均可交易，包含周末与节假日。"
           : `${market === "CN" ? "中国" : "美国"}市场自动排除周末与已核验节假日。日计划休市跳过，周/月计划顺延。`}{" "}
@@ -3310,7 +3354,13 @@ function SettingsPanel({
   const currentMonth = monthBounds(today().slice(0, 7));
   const planned = occurrences(state, currentMonth.from, currentMonth.to).reduce(
     (sum, o) =>
-      sum + convert(o.plan.amount, o.account.currency, "CNY", fxAt(state).rate),
+      sum +
+      convert(
+        o.plan.amount,
+        o.plan.currency ?? o.account.currency,
+        "CNY",
+        fxAt(state).rate,
+      ),
     0,
   );
   return (

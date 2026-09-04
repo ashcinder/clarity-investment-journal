@@ -35,6 +35,7 @@ export type Entry = {
   transferId?: string;
 };
 export type Plan = {
+  currency?: Currency;
   id: string;
   accountId: string;
   name: string;
@@ -691,7 +692,7 @@ export function occurrences(
     );
 }
 export function isDue(o: Occurrence, now = new Date()) {
-  const zone = o.plan.market === "US" ? "America/New_York" : "Asia/Shanghai";
+  const zone = "Asia/Shanghai";
   const localDate = today(zone, now);
   const time = new Intl.DateTimeFormat("en-GB", {
     timeZone: zone,
@@ -701,11 +702,7 @@ export function isDue(o: Occurrence, now = new Date()) {
   }).format(now);
   return o.date < localDate || (o.date === localDate && o.plan.time <= time);
 }
-export function nextOccurrence(
-  state: Ledger,
-  plan: Plan,
-  from = today(plan.market === "US" ? "America/New_York" : "Asia/Shanghai"),
-) {
+export function nextOccurrence(state: Ledger, plan: Plan, from = today()) {
   return (
     occurrences(state, from, addDays(from, 65)).find(
       (o) => o.plan.id === plan.id && !o.done && !o.skipped,
@@ -906,6 +903,8 @@ export function validateLedger(input: unknown): Ledger {
         typeof p.paused === "boolean",
       "定投信息无效",
     );
+    if (p.currency !== undefined)
+      assert(["USD", "CNY"].includes(p.currency), "定投币种必须为 USD 或 CNY");
     if (p.mode !== undefined)
       assert(["auto", "manual"].includes(p.mode), "记账方式无效");
     if (p.autoFrom !== undefined)
@@ -1076,5 +1075,22 @@ export function deleteHolding(state: Ledger, holding: Holding): void {
   state.plans = state.plans.filter((p) => p.holdingId !== holding.id);
   state.skipped = state.skipped.filter(
     (k) => ![...removedPlans].some((id) => k.startsWith(id + ":")),
+  );
+}
+
+export function planAccountAmount(
+  state: Ledger,
+  plan: Plan,
+  date = today(),
+): number {
+  const account = state.accounts.find((a) => a.id === plan.accountId);
+  if (!account) throw Error("定投账户不存在");
+  return round(
+    convert(
+      plan.amount,
+      plan.currency ?? account.currency,
+      account.currency,
+      fxAt(state, date).rate,
+    ),
   );
 }

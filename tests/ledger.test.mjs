@@ -214,7 +214,7 @@ test('paused plans and future starts never generate occurrences', () => {
     0,
   );
 });
-test('market local time respects daylight saving and confirmation time', () => {
+test('all markets use Beijing time in summer and winter', () => {
   const s = seedLedger(date);
   const o = {
     plan: plan({ market: 'US', time: '10:00' }),
@@ -224,14 +224,14 @@ test('market local time respects daylight saving and confirmation time', () => {
     done: false,
     skipped: false,
   };
-  assert.equal(isDue(o, new Date('2026-09-04T13:59:00Z')), false);
-  assert.equal(isDue(o, new Date('2026-09-04T14:00:00Z')), true);
+  assert.equal(isDue(o, new Date('2026-09-04T01:59:00Z')), false);
+  assert.equal(isDue(o, new Date('2026-09-04T02:00:00Z')), true);
   assert.equal(
-    isDue({ ...o, date: '2026-01-05' }, new Date('2026-01-05T14:59:00Z')),
+    isDue({ ...o, date: '2026-01-05' }, new Date('2026-01-05T01:59:00Z')),
     false,
   );
   assert.equal(
-    isDue({ ...o, date: '2026-01-05' }, new Date('2026-01-05T15:00:00Z')),
+    isDue({ ...o, date: '2026-01-05' }, new Date('2026-01-05T02:00:00Z')),
     true,
   );
 });

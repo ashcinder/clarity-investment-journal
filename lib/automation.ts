@@ -6,6 +6,8 @@ import {
   today,
   fxAt,
   validateLedger,
+  planAccountAmount,
+  money,
 } from "./ledger.ts";
 export function upgradeLedger(input: Ledger, now = new Date()): Ledger {
   const state = structuredClone(input);
@@ -17,10 +19,7 @@ export function upgradeLedger(input: Ledger, now = new Date()): Ledger {
       : {
           ...p,
           mode: "auto",
-          autoFrom: today(
-            p.market === "US" ? "America/New_York" : "Asia/Shanghai",
-            now,
-          ),
+          autoFrom: today("Asia/Shanghai", now),
         },
   );
   return state;
@@ -28,7 +27,7 @@ export function upgradeLedger(input: Ledger, now = new Date()): Ledger {
 export function scheduledInstant(date: string, plan: Plan): string {
   const target = Date.parse(date + "T" + plan.time + ":00Z");
   let value = target;
-  const zone = plan.market === "US" ? "America/New_York" : "Asia/Shanghai";
+  const zone = "Asia/Shanghai";
   for (let i = 0; i < 2; i++) {
     const parts = new Intl.DateTimeFormat("en-CA", {
       timeZone: zone,
@@ -59,10 +58,7 @@ export function materializeAutomatic(
     const from = [plan.startDate, plan.autoFrom ?? plan.startDate]
       .sort()
       .at(-1)!;
-    const end = today(
-      plan.market === "US" ? "America/New_York" : "Asia/Shanghai",
-      now,
-    );
+    const end = today("Asia/Shanghai", now);
     const single = { ...state, plans: [plan] };
     for (const o of occurrences(single, from, end)) {
       if (o.done || o.skipped || !isDue(o, now)) continue;
@@ -73,10 +69,15 @@ export function materializeAutomatic(
         accountId: plan.accountId,
         ...(plan.holdingId ? { holdingId: plan.holdingId } : {}),
         kind: "deposit",
-        amount: plan.amount,
+        amount: planAccountAmount(state, plan, o.date),
         date: o.date,
         fx: fxAt(state, o.date).rate,
-        note: "按计划自动记账：" + plan.name + "（不代表实际成交）",
+        note:
+          "按计划自动记账：" +
+          plan.name +
+          " · " +
+          money(plan.amount, plan.currency ?? o.account.currency) +
+          "（北京时间；不代表实际成交）",
         createdAt: scheduledInstant(o.date, plan),
         planKey: o.key,
         automatic: true,
