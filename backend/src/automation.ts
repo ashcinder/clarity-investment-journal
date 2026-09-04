@@ -71,6 +71,7 @@ export function materializeAutomatic(
       const amount = planAccountAmount(state, plan, o.date);
       const estimatedQuantity =
         holding &&
+        holding.trackingMode !== "amount" &&
         assetType(state, holding) !== "grid" &&
         position?.unitPrice &&
         position.unitPrice > 0
@@ -96,9 +97,11 @@ export function materializeAutomatic(
           " · " +
           money(plan.amount, plan.currency ?? o.account.currency) +
           "（北京时间；不代表实际成交）" +
-          (estimatedQuantity !== undefined
-            ? "；数量按最近手动价格估算"
-            : "；数量待实际成交后更新"),
+          (holding?.trackingMode === "amount"
+            ? "；已累计投入金额，可在资产中更新收益率"
+            : estimatedQuantity !== undefined
+              ? "；数量按最近手动价格估算"
+              : "；数量待实际成交后更新"),
         createdAt: scheduledInstant(o.date, plan),
         planKey: o.key,
         automatic: true,

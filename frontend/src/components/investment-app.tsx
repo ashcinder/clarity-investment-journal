@@ -74,10 +74,8 @@ import {
   accountStats,
   planAccountAmount,
   holdingStats,
-  positionStats,
   assetType,
-  recordPosition,
-  type PositionInput,
+  updateHoldingAmounts,
   deleteHolding,
   unallocated,
   allocateHolding,
@@ -2472,7 +2470,7 @@ export default function InvestmentApp() {
                 accountId={modal.accountId}
                 holding={modal.holding}
                 busy={busy}
-                onSubmit={(holding, amount, source, _roi, position) =>
+                onSubmit={(holding, amount, source, roi) =>
                   modalSubmit(() =>
                     change((next) => {
                       next.holdings ??= [];
@@ -2488,9 +2486,9 @@ export default function InvestmentApp() {
                           );
                       }
                       next.entries.push(
-                        recordPosition(next, holding, position),
+                        updateHoldingAmounts(next, holding, amount, roi),
                       );
-                    }, "资产持仓已保存，数量与市值已更新"),
+                    }, "资产已保存，投入、收益与估值已更新"),
                   )
                 }
                 onRemove={
@@ -2935,13 +2933,19 @@ function AccountForm({
         className={`account-image-editor field-wide${imageDragOver ? " is-drag-over" : ""}`}
         onDragEnter={(event) => {
           event.preventDefault();
-          if (busy || imageJob.current || !event.dataTransfer.types.includes("Files")) return;
+          if (
+            busy ||
+            imageJob.current ||
+            !event.dataTransfer.types.includes("Files")
+          )
+            return;
           imageDragDepth.current += 1;
           setImageDragOver(true);
         }}
         onDragOver={(event) => {
           event.preventDefault();
-          event.dataTransfer.dropEffect = busy || imageJob.current ? "none" : "copy";
+          event.dataTransfer.dropEffect =
+            busy || imageJob.current ? "none" : "copy";
         }}
         onDragLeave={(event) => {
           event.preventDefault();
@@ -2956,7 +2960,11 @@ function AccountForm({
           if (busy || imageJob.current) return;
           const files = event.dataTransfer.files;
           if (files.length !== 1) {
-            setImageError(files.length > 1 ? "每次请拖入一张图片。" : "请拖入电脑中的 PNG、JPG、WebP 或 SVG 图片文件。");
+            setImageError(
+              files.length > 1
+                ? "每次请拖入一张图片。"
+                : "请拖入电脑中的 PNG、JPG、WebP 或 SVG 图片文件。",
+            );
             return;
           }
           void selectImage(files[0]);
@@ -3870,48 +3878,25 @@ function HoldingForm({
     h: Holding,
     amount: number,
     source: "existing" | "new",
-    roi: number | null,
-    position: PositionInput,
+    roi: number,
   ) => Promise<void>;
   onRemove?: () => void;
 }) {
   const account = state.accounts.find((a) => a.id === accountId)!;
-  const initial = holding ? positionStats(state, holding) : null;
+  const initial = holding ? holdingStats(state, holding) : null;
   const [name, setName] = useState(holding?.name ?? "");
-  const [symbol, setSymbol] = useState(holding?.symbol ?? "");
   const [type, setType] = useState<Category>(
     holding?.assetType ?? account.category,
   );
-  const [quantity, setQuantity] = useState(
-    initial?.quantity != null ? String(initial.quantity) : "",
-  );
-  const [cost, setCost] = useState(
-    initial?.unitCost != null ? String(initial.unitCost) : "",
-  );
-  const [price, setPrice] = useState(
-    initial?.quantity && initial.quantity > 0
-      ? String(initial.value / initial.quantity)
-      : "",
-  );
-  const [margin, setMargin] = useState(initial ? String(initial.invested) : "");
-  const [equity, setEquity] = useState(initial ? String(initial.value) : "");
-  const [mode, setMode] = useState("price");
+  const [amount, setAmount] = useState(initial ? String(initial.invested) : "");
   const [roi, setRoi] = useState(
-    initial?.roi != null ? String(Number(initial.roi.toFixed(6))) : "0",
+    initial?.roi != null ? String(initial.roi) : "0",
   );
-  const [side, setSide] = useState(holding?.side ?? "neutral");
-  const [leverage, setLeverage] = useState(String(holding?.leverage ?? 1));
   const [source, setSource] = useState<"new" | "existing">("new");
-  const grid = type === "grid";
-  const principal = grid ? Number(margin) : Number(quantity) * Number(cost);
-  const currentPrice =
-    mode === "roi" ? Number(cost) * (1 + Number(roi) / 100) : Number(price);
-  const value = grid
-    ? mode === "roi"
-      ? Number(margin) * (1 + Number(roi) / 100)
-      : Number(equity)
-    : Number(quantity) * currentPrice;
-  const unit = type === "stock" ? "股" : type === "fund" ? "份" : "个";
+  const principal = Number(amount);
+  const withdrawn = initial?.withdrawn ?? 0;
+  const profit = (principal * Number(roi)) / 100;
+  const value = principal + profit - withdrawn;
   return (
     <FormShell
       busy={busy}
@@ -3927,24 +3912,18 @@ function HoldingForm({
       onSubmit={() =>
         onSubmit(
           {
+            ...holding,
             id: holding?.id ?? uid(),
             accountId,
             name: name.trim(),
-            symbol: symbol.trim().toUpperCase() || name.trim().slice(0, 30),
+            symbol: holding?.symbol ?? name.trim().slice(0, 30),
             archived: holding?.archived ?? false,
             assetType: type,
-            ...(grid ? { side, leverage: Number(leverage) } : {}),
+            trackingMode: "amount",
           },
           principal,
           source,
-          null,
-          {
-            quantity: Number(quantity),
-            unitCost: grid ? 0 : Number(cost),
-            unitPrice: grid ? 0 : currentPrice,
-            margin: grid ? Number(margin) : 0,
-            equity: grid ? value : 0,
-          },
+          Number(roi),
         )
       }
     >
@@ -3952,20 +3931,12 @@ function HoldingForm({
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="比特币 / SPY / 白酒基金"
+          placeholder="例如：Doge、SPY、白酒基金"
           maxLength={80}
           required
         />
       </Field>
-      <Field label="代码 / 交易对">
-        <Input
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          placeholder="BTC / SPY / BTCUSDT"
-          maxLength={30}
-        />
-      </Field>
-      <Field label="资产类型">
+      <Field label="资产类型" hint="默认跟随账户，用于资产占比统计">
         <NativeSelect
           value={type}
           disabled={!!holding}
@@ -3973,115 +3944,41 @@ function HoldingForm({
         >
           <option value="crypto">加密货币现货</option>
           <option value="stock">美股 / ETF</option>
-          <option value="grid">合约网格仓位</option>
+          <option value="grid">合约网格</option>
           <option value="fund">基金</option>
         </NativeSelect>
       </Field>
       <Field
-        label={grid ? "仓位数量（资产币）" : `持有数量（${unit}）`}
-        hint="支持小数，可随时更新实际数量"
+        label={`累计投入金额（${account.currency}）`}
+        hint={
+          type === "grid"
+            ? "填写实际投入的本金 / 保证金"
+            : "填写这项资产累计投入的本金"
+        }
       >
         <Input
           type="number"
           min="0"
           max="1000000000000"
           step="any"
-          value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="例如 1200"
           required
         />
       </Field>
-      {grid ? (
-        <>
-          <Field label="仓位方向">
-            <NativeSelect
-              value={side}
-              onChange={(e) =>
-                setSide(e.target.value as "long" | "short" | "neutral")
-              }
-            >
-              <option value="neutral">中性网格</option>
-              <option value="long">做多网格</option>
-              <option value="short">做空网格</option>
-            </NativeSelect>
-          </Field>
-          <Field label="杠杆倍数">
-            <Input
-              type="number"
-              min="1"
-              max="1000"
-              step="any"
-              value={leverage}
-              onChange={(e) => setLeverage(e.target.value)}
-              required
-            />
-          </Field>
-          <Field label={`投入保证金（${account.currency}）`}>
-            <Input
-              type="number"
-              min="0"
-              max="1000000000000"
-              step="any"
-              value={margin}
-              onChange={(e) => setMargin(e.target.value)}
-              required
-            />
-          </Field>
-        </>
-      ) : (
-        <Field label={`平均成本（${account.currency} / ${unit}）`}>
-          <Input
-            type="number"
-            min="0"
-            max="1000000000000"
-            step="any"
-            value={cost}
-            onChange={(e) => setCost(e.target.value)}
-            required
-          />
-        </Field>
-      )}
-      <Field label="估值填写方式">
-        <NativeSelect value={mode} onChange={(e) => setMode(e.target.value)}>
-          <option value="price">
-            {grid ? "填写当前权益" : "填写当前单价 / 净值"}
-          </option>
-          <option value="roi">手动填写收益率</option>
-        </NativeSelect>
+      <Field label="收益率（%）" hint="累计收益率；亏损填负数，暂无收益填 0">
+        <Input
+          type="number"
+          min="-100"
+          max="100000"
+          step="any"
+          value={roi}
+          onChange={(e) => setRoi(e.target.value)}
+          placeholder="例如 8.5 或 -2.3"
+          required
+        />
       </Field>
-      {mode === "roi" ? (
-        <Field label="收益率（%）">
-          <Input
-            type="number"
-            min="-100"
-            max="100000"
-            step="any"
-            value={roi}
-            onChange={(e) => setRoi(e.target.value)}
-            required
-          />
-        </Field>
-      ) : (
-        <Field
-          label={
-            grid
-              ? `当前权益（${account.currency}）`
-              : `当前单价 / 净值（${account.currency}）`
-          }
-        >
-          <Input
-            type="number"
-            min="0"
-            max="1000000000000"
-            step="any"
-            value={grid ? equity : price}
-            onChange={(e) =>
-              grid ? setEquity(e.target.value) : setPrice(e.target.value)
-            }
-            required
-          />
-        </Field>
-      )}
       {!holding && unallocated(state, account) > 0 && (
         <Field label="本金来源" wide>
           <NativeSelect
@@ -4090,28 +3987,29 @@ function HoldingForm({
           >
             <option value="new">新录入资产</option>
             <option value="existing">
-              使用旧版账户余额（
+              使用账户未分配资金（
               {money(unallocated(state, account), account.currency)}）
             </option>
           </NativeSelect>
         </Field>
       )}
       <div className="holding-preview field-wide">
-        <span>
-          {grid
-            ? "仓位权益（不将杠杆名义价值计入总资产）"
-            : "资产市值 = 持有数量 × 当前单价"}
-        </span>
+        <span>当前价值 · 自动计算</span>
         <strong>{money(value, account.currency)}</strong>
         <small>
-          成本 {money(principal, account.currency)} · 收益{" "}
-          {money(value - principal, account.currency)} ·{" "}
-          {pct(principal > 0 ? ((value - principal) / principal) * 100 : null)}
+          投入 {money(principal, account.currency)} · 收益{" "}
+          {money(profit, account.currency)}
+        </small>
+        <small>
+          投入金额 ×（1 + 收益率）
+          {withdrawn > 0
+            ? ` − 已取出 ${money(withdrawn, account.currency)}`
+            : ""}
         </small>
       </div>
-      {holding && initial?.quantity == null && (
+      {holding && (
         <div className="form-tip field-wide">
-          这条旧记录只有金额，请补充实际数量和平均成本后保存。
+          保存会记录今天的估值。定投自动累计投入金额，之后只需更新收益率。
         </div>
       )}
     </FormShell>
@@ -4255,7 +4153,7 @@ function AccountDetail({
         <div className="panel-header">
           <div>
             <h2>我的资产</h2>
-            <p>直接记录数量、成本和价格；同一账户可持有多项资产。</p>
+            <p>记录投入金额和收益率，自动汇总每项资产的价值。</p>
           </div>
           <Button
             className="primary-button"
@@ -4272,9 +4170,8 @@ function AccountDetail({
               <TableHeader>
                 <TableRow>
                   <TableHead>资产名称</TableHead>
-                  <TableHead className="right">持有数量 / 仓位</TableHead>
-                  <TableHead className="right">成本 / 保证金</TableHead>
-                  <TableHead className="right">单价 / 净值</TableHead>
+                  <TableHead className="right">投入金额</TableHead>
+                  <TableHead className="right">收益金额</TableHead>
                   <TableHead className="right">收益率</TableHead>
                   <TableHead className="right">当前估值</TableHead>
                   <TableHead className="right">操作</TableHead>
@@ -4282,7 +4179,7 @@ function AccountDetail({
               </TableHeader>
               <TableBody>
                 {positions.map((h) => {
-                  const hs = positionStats(state, h);
+                  const hs = holdingStats(state, h);
                   return (
                     <TableRow key={h.id}>
                       <TableCell>
@@ -4297,28 +4194,14 @@ function AccountDetail({
                         </div>
                       </TableCell>
                       <TableCell className="right">
-                        {hs.quantity === null
-                          ? "待补充"
-                          : hs.quantity.toLocaleString("zh-CN", {
-                              maximumFractionDigits: 10,
-                            })}
-                        {assetType(state, h) === "grid"
-                          ? ` · ${h.leverage ?? 1}×`
-                          : assetType(state, h) === "stock"
-                            ? " 股"
-                            : assetType(state, h) === "fund"
-                              ? " 份"
-                              : " 个"}
-                      </TableCell>
-                      <TableCell className="right">
                         {money(hs.invested, account.currency)}
                       </TableCell>
-                      <TableCell className="right">
-                        {assetType(state, h) === "grid"
-                          ? "按总权益"
-                          : hs.quantity && hs.quantity > 0
-                            ? money(hs.value / hs.quantity, account.currency)
-                            : "—"}
+                      <TableCell
+                        className={
+                          "right " + (hs.profit >= 0 ? "gain" : "loss")
+                        }
+                      >
+                        {money(hs.profit, account.currency)}
                       </TableCell>
                       <TableCell
                         className={
@@ -4361,7 +4244,7 @@ function AccountDetail({
           <Empty
             icon={Wallet}
             title="添加这个账户的第一个资产"
-            text="添加币种、股票、基金或网格仓位，按数量与价格汇总资产。"
+            text="填写资产名称、投入金额和收益率，开始记录你的投资。"
             action={
               <Button onClick={onAdd} disabled={account.archived}>
                 <Plus size={14} />

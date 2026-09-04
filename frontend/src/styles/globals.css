@@ -2515,7 +2515,7 @@ h1 > span {
   margin-top: 8px;
 }
 .holding-table {
-  min-width: 950px;
+  min-width: 720px;
 }
 @media (max-width: 650px) {
   .reset-panel {

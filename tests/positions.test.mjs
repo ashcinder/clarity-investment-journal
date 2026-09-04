@@ -5,6 +5,9 @@ import {
   emptyLedger,
   clearLedger,
   recordPosition,
+  updateHoldingAmounts,
+  allocateHolding,
+  holdingStats,
   positionStats,
   portfolio,
   validateLedger,
@@ -130,4 +133,46 @@ test("delete one position leaves the other quantities and values intact", () => 
   validateLedger(s);
   assert.equal(positionStats(s, b).quantity, 3);
   assert.equal(portfolio(s).value, 450);
+});
+
+test("amount-only assets calculate manual returns for crypto, stock, grid and CNY funds", () => {
+  for (const type of ["crypto", "stock", "grid", "fund"]) {
+    const s = fixture();
+    if (type === "fund") Object.assign(s.accounts[0], { category: "fund", currency: "CNY" });
+    const h = { id: type, accountId: "wallet", symbol: type, name: type, assetType: type, trackingMode: "amount", archived: false };
+    s.holdings.push(h);
+    s.entries.push(...allocateHolding(s, h, 1200, "new", date));
+    s.entries.push(updateHoldingAmounts(s, h, 1200, 10, date));
+    validateLedger(s);
+    assert.equal(holdingStats(s, h).value, 1320);
+    assert.equal(holdingStats(s, h).profit, 120);
+    assert.equal(positionStats(s, h).quantity, null);
+    s.entries.push(updateHoldingAmounts(s, h, 1500, -10, date));
+    validateLedger(s);
+    assert.equal(holdingStats(s, h).invested, 1500);
+    assert.equal(holdingStats(s, h).value, 1350);
+    assert.equal(holdingStats(s, h).profit, -150);
+  }
+});
+
+test("simplifying an existing position preserves history; auto deposits add money without invented units or profit", () => {
+  const s = fixture();
+  const h = add(s, "BTC", "crypto", input(0.02, 60000, 66000));
+  s.entries[0].date = "2026-09-01";
+  const original = structuredClone(s.entries[0]);
+  h.trackingMode = "amount";
+  s.entries.push(updateHoldingAmounts(s, h, 1200, 10, "2026-09-02"));
+  s.plans.push({ id: "simple-auto", accountId: "wallet", holdingId: h.id, name: "定投", amount: 60,
+    currency: "USD", frequency: "daily", day: 1, time: "14:00", market: "CRYPTO", mode: "auto",
+    autoFrom: "2026-09-04", startDate: "2026-09-04", paused: false });
+  const result = materializeAutomatic(s, new Date("2026-09-04T06:00:00Z"));
+  assert.equal(result.added, 1);
+  assert.deepEqual(result.state.entries[0], original);
+  assert.equal(result.state.entries.at(-1).quantityDelta, undefined);
+  assert.equal(holdingStats(result.state, h).invested, 1260);
+  assert.equal(holdingStats(result.state, h).value, 1380);
+  assert.equal(holdingStats(result.state, h).profit, 120);
+  assert.equal(holdingStats(result.state, h).roi, 120 / 1260 * 100);
+  assert.equal(materializeAutomatic(result.state, new Date("2026-09-04T06:00:00Z")).added, 0);
+  validateLedger(result.state);
 });

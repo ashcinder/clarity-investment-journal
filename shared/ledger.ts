@@ -15,6 +15,7 @@ export type Account = {
   note: string;
 };
 export type Holding = {
+  trackingMode?: "amount" | "quantity";
   assetType?: Category;
   side?: "long" | "short" | "neutral";
   leverage?: number;
@@ -829,6 +830,11 @@ export function validateLedger(input: unknown): Ledger {
     );
     if (h.assetType !== undefined)
       assert(Object.hasOwn(categories, h.assetType), "资产类型无效");
+    if (h.trackingMode !== undefined)
+      assert(
+        ["amount", "quantity"].includes(h.trackingMode),
+        "资产记录方式无效",
+      );
     if (h.side !== undefined)
       assert(["long", "short", "neutral"].includes(h.side), "仓位方向无效");
     if (h.leverage !== undefined)
@@ -1071,6 +1077,8 @@ export function updateHoldingAmounts(
   const value = round(principal * (1 + rate / 100) - stats.withdrawn);
   if (value < 0)
     throw Error("投入金额和收益率不能使估值低于已取出金额，请核对历史取出记录");
+  if (value > 1e12)
+    throw Error("计算后的资产价值超过上限，请核对投入金额和收益率");
   return {
     id: uid(),
     accountId: holding.accountId,
