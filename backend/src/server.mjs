@@ -62,9 +62,19 @@ db.exec(
      id TEXT PRIMARY KEY,
      email TEXT NOT NULL COLLATE NOCASE UNIQUE,
      password_hash TEXT NOT NULL,
+     session_version INTEGER NOT NULL DEFAULT 0,
      created_at TEXT NOT NULL
    );`,
 );
+if (
+  !db
+    .prepare("PRAGMA table_info(users)")
+    .all()
+    .some((column) => column.name === "session_version")
+)
+  db.exec(
+    "ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0",
+  );
 const hashPassword = (password, salt = randomBytes(16).toString("hex")) =>
   `${salt}:${scryptSync(password, salt, 64).toString("hex")}`;
 const verifyPassword = (password, stored) => {
@@ -154,6 +164,7 @@ const createSession = (user) => {
     JSON.stringify({
       userId: user.id,
       email: user.email,
+      sessionVersion: user.session_version,
       expires: Date.now() + sessionSeconds * 1000,
     }),
   ).toString("base64url");
@@ -175,12 +186,15 @@ const sessionUser = (req) => {
     if (
       typeof session.userId !== "string" ||
       typeof session.email !== "string" ||
+      !Number.isSafeInteger(session.sessionVersion) ||
       session.expires <= Date.now()
     )
       return null;
     const user = db
-      .prepare("SELECT id,email FROM users WHERE id=? AND email=?")
-      .get(session.userId, session.email);
+      .prepare(
+        "SELECT id,email,session_version FROM users WHERE id=? AND email=? AND session_version=?",
+      )
+      .get(session.userId, session.email, session.sessionVersion);
     return user || null;
   } catch {
     return null;
@@ -292,7 +306,9 @@ const server = http.createServer(async (req, res) => {
       const email = normalizedEmail(body.email);
       const user = validEmail(email)
         ? db
-            .prepare("SELECT id,email,password_hash FROM users WHERE email=?")
+            .prepare(
+              "SELECT id,email,password_hash,session_version FROM users WHERE email=?",
+            )
             .get(email)
         : null;
       const valid =
@@ -340,7 +356,7 @@ const server = http.createServer(async (req, res) => {
         json(res, 409, { error: "该邮箱已经注册，请直接登录" });
         return;
       }
-      const user = { id: randomUUID(), email };
+      const user = { id: randomUUID(), email, session_version: 0 };
       db.exec("BEGIN IMMEDIATE");
       try {
         db.prepare(
@@ -377,6 +393,40 @@ const server = http.createServer(async (req, res) => {
     const user = url.pathname.startsWith("/api/") ? sessionUser(req) : null;
     if (url.pathname.startsWith("/api/") && !user) {
       json(res, 401, { error: "请先登录投资手账" });
+      return;
+    }
+    if (url.pathname === "/api/change-password" && req.method === "POST") {
+      if (!authEnabled) {
+        json(res, 404, { error: "此环境未启用密码登录" });
+        return;
+      }
+      const body = await bodyOf(req);
+      if (!validNewPassword(body.newPassword))
+        throw Error("新密码需要 8–128 个字符");
+      const account = db
+        .prepare(
+          "SELECT id,email,password_hash,session_version FROM users WHERE id=?",
+        )
+        .get(user.id);
+      if (
+        !account ||
+        typeof body.currentPassword !== "string" ||
+        !verifyPassword(body.currentPassword, account.password_hash)
+      ) {
+        json(res, 401, { error: "当前密码不正确" });
+        return;
+      }
+      const nextVersion = account.session_version + 1;
+      db.prepare(
+        "UPDATE users SET password_hash=?,session_version=? WHERE id=?",
+      ).run(hashPassword(body.newPassword), nextVersion, account.id);
+      const renewed = { ...account, session_version: nextVersion };
+      json(
+        res,
+        200,
+        { changed: true, email: renewed.email },
+        { "Set-Cookie": sessionCookie(createSession(renewed)) },
+      );
       return;
     }
     if (url.pathname === "/api/ledger" && req.method === "GET") {

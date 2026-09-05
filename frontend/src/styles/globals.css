@@ -550,6 +550,18 @@ h1 > span {
 .top-right {
   gap: 22px;
 }
+.top-logout-button {
+  height: 32px !important;
+  gap: 6px;
+  border-color: #dce7e4 !important;
+  color: #55757a !important;
+  background: #fbfdfc !important;
+}
+.top-logout-button:hover {
+  border-color: #b9d3cc !important;
+  color: #176f61 !important;
+  background: #f0f7f4 !important;
+}
 .top-date {
   font-size: 10px;
   letter-spacing: 0.7px;
@@ -2077,6 +2089,13 @@ h1 > span {
   .top-right {
     gap: 5px;
   }
+  .top-logout-button {
+    width: 32px;
+    padding: 0 !important;
+  }
+  .top-logout-button span {
+    display: none;
+  }
   .overview-charts {
     grid-template-columns: 1fr;
   }
@@ -2847,6 +2866,44 @@ h1 > span {
   gap: 20px;
   border-color: #eddcda;
 }
+.account-security-panel {
+  padding: 22px 24px;
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-color: #d9e8e3;
+  background: linear-gradient(110deg, #f8fcfa, #fff);
+}
+.account-security-panel > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+}
+.account-security-panel h2 {
+  color: #284b50;
+  font-size: 16px;
+}
+.account-security-panel p {
+  margin-top: 6px;
+  overflow: hidden;
+  color: #839b9c;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-security-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 12px;
+  color: #227e6d;
+  background: #e5f3ee;
+}
 .reset-panel h2 {
   font-size: 17px;
   color: #9e554c;
@@ -2860,9 +2917,16 @@ h1 > span {
   min-width: 720px;
 }
 @media (max-width: 650px) {
-  .reset-panel {
+  .reset-panel,
+  .account-security-panel {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .account-security-panel > .row {
+    width: 100%;
+  }
+  .account-security-panel > .row [data-slot="button"] {
+    flex: 1;
   }
 }
 
@@ -3156,15 +3220,19 @@ h1 > span {
   font-size: 10px;
 }
 .logout-button {
-  width: 31px;
+  width: auto;
   height: 31px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
   margin-left: auto;
   border: 0;
   border-radius: 8px;
   color: #89a1a9;
   background: #ffffff0a;
+  font-size: 10px;
 }
 .logout-button:hover {
   color: #e3f0ed;

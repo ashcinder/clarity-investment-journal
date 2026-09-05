@@ -4,9 +4,21 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 test("password login protects the server ledger and serves the built frontend", async () => {
   const directory = await mkdtemp(join(tmpdir(), "clarity-auth-test-"));
+  const databasePath = join(directory, "test.sqlite");
+  const legacyDatabase = new DatabaseSync(databasePath);
+  legacyDatabase.exec(`
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+  legacyDatabase.close();
   const origin = "http://127.0.0.1:44320";
   let output = "";
   const child = spawn(process.execPath, ["backend/src/server.mjs"], {
@@ -16,7 +28,7 @@ test("password login protects the server ledger and serves the built frontend", 
       CLARITY_PUBLIC_ORIGIN: origin,
       CLARITY_FRONTEND_ORIGIN: origin,
       CLARITY_FRONTEND_DIR: resolve("frontend/dist"),
-      CLARITY_DB_PATH: join(directory, "test.sqlite"),
+      CLARITY_DB_PATH: databasePath,
       CLARITY_LOGIN_EMAIL: "owner@example.com",
       CLARITY_LOGIN_PASSWORD: "correct horse battery staple",
       CLARITY_SESSION_SECRET: "test-secret-with-more-than-thirty-two-characters",
@@ -125,12 +137,73 @@ test("password login protects the server ledger and serves the built frontend", 
     });
     assert.equal(duplicate.status, 409);
 
+    const changePassword = await request("/api/change-password", {
+      method: "POST",
+      headers: {
+        Cookie: newCookie,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        currentPassword: "a secure password",
+        newPassword: "a newer secure password",
+      }),
+    });
+    assert.equal(changePassword.status, 200);
+    const renewedCookie = changePassword.headers.get("set-cookie");
+    assert.match(renewedCookie, /clarity_session=/);
+    assert.equal(
+      (await request("/api/ledger", { headers: { Cookie: newCookie } })).status,
+      401,
+    );
+    assert.equal(
+      (
+        await request("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: "new@example.com",
+            password: "a secure password",
+          }),
+        })
+      ).status,
+      401,
+    );
+    assert.equal(
+      (
+        await request("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: "new@example.com",
+            password: "a newer secure password",
+          }),
+        })
+      ).status,
+      200,
+    );
+    assert.equal(
+      (
+        await request("/api/ledger", {
+          headers: { Cookie: renewedCookie },
+        })
+      ).status,
+      200,
+    );
+
     const logout = await request("/api/logout", {
       method: "POST",
       headers: { Cookie: cookie },
     });
     assert.equal(logout.status, 200);
     assert.match(logout.headers.get("set-cookie"), /Max-Age=0/);
+    assert.equal(
+      (
+        await request("/api/ledger", {
+          headers: { Cookie: "clarity_session=" },
+        })
+      ).status,
+      401,
+    );
   } finally {
     if (child.exitCode === null)
       await new Promise((done) => {

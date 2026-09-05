@@ -154,6 +154,7 @@ type Modal =
   | { kind: "journal"; journal?: Journal }
   | { kind: "transfer" }
   | { kind: "reset" }
+  | { kind: "password" }
   | { kind: "calendar" }
   | {
       kind: "confirm";
@@ -457,6 +458,7 @@ export default function InvestmentApp() {
   const importRef = useRef<HTMLInputElement>(null);
   const dataRef = useRef(data);
   const saving = useRef(false);
+  const lastFxAttempt = useRef(0);
   useEffect(() => {
     if (!notice) return;
     const t = setTimeout(() => setNotice(""), 6500);
@@ -569,8 +571,14 @@ export default function InvestmentApp() {
       setPasswordAuth(body.authMode === "password");
       setLoadError("");
       if (body.autoAdded) setNotice(`已自动补记 ${body.autoAdded} 笔定投`);
-      if (body.state.settings.autoFx && fxAt(body.state).date < today())
+      if (
+        body.state.settings.autoFx &&
+        fxAt(body.state).date < today() &&
+        Date.now() - lastFxAttempt.current > 15 * 60 * 1000
+      ) {
+        lastFxAttempt.current = Date.now();
         void syncFx(true);
+      }
     } catch (e) {
       setLoadError(errorText(e));
     }
@@ -850,12 +858,33 @@ export default function InvestmentApp() {
   async function logout() {
     setBusy(true);
     try {
-      await fetch("/api/logout", { method: "POST" });
+      const response = await fetch("/api/logout", { method: "POST" });
+      if (!response.ok) throw Error("退出失败，请重试");
       dataRef.current = null;
       setData(null);
       setAuthRequired(true);
+      setMobile(false);
       setModal(null);
       setDetailId(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function changePassword(
+    currentPassword: string,
+    newPassword: string,
+  ) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) throw Error(body.error || "密码修改失败");
+      setModal(null);
+      setNotice("密码已更新，其他设备需要重新登录");
     } finally {
       setBusy(false);
     }
@@ -921,6 +950,7 @@ export default function InvestmentApp() {
               onClick={() => void logout()}
             >
               <LogOut size={15} />
+              <span>退出</span>
             </button>
           )}
         </div>
@@ -962,6 +992,20 @@ export default function InvestmentApp() {
             >
               <RefreshCw size={15} />
             </button>
+            {passwordAuth && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="top-logout-button"
+                aria-label="退出登录"
+                title="退出登录"
+                disabled={busy}
+                onClick={() => void logout()}
+              >
+                <LogOut size={14} />
+                <span>退出登录</span>
+              </Button>
+            )}
           </div>
         </header>
         {!s || !totals || !usd || !cny ? (
@@ -2560,6 +2604,36 @@ export default function InvestmentApp() {
                   onImport={() => importRef.current?.click()}
                   onCalendar={() => setModal({ kind: "calendar" })}
                 />
+                {passwordAuth && (
+                  <section className="panel account-security-panel">
+                    <div>
+                      <span className="account-security-icon">
+                        <ShieldCheck size={19} />
+                      </span>
+                      <div>
+                        <h2>账户与安全</h2>
+                        <p>{data.user?.email} · 当前账号的账本独立保存</p>
+                      </div>
+                    </div>
+                    <div className="row">
+                      <Button
+                        variant="outline"
+                        onClick={() => setModal({ kind: "password" })}
+                      >
+                        <LockKeyhole size={14} />
+                        修改密码
+                      </Button>
+                      <Button
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => void logout()}
+                      >
+                        <LogOut size={14} />
+                        退出登录
+                      </Button>
+                    </div>
+                  </section>
+                )}
                 <section className="panel reset-panel">
                   <div>
                     <h2>清空测试数据</h2>
@@ -2652,6 +2726,8 @@ export default function InvestmentApp() {
                           ? "管理交易日历"
                           : modal.kind === "reset"
                             ? "清空测试数据"
+                            : modal.kind === "password"
+                              ? "修改登录密码"
                             : modal.kind === "holding"
                               ? modal.holding
                                 ? "编辑账户资产"
@@ -2671,9 +2747,11 @@ export default function InvestmentApp() {
                     ? "仅支持同币种转账，两边同时入账，不增加组合总投入。"
                     : modal.kind === "calendar"
                       ? "按交易所公告填写整年的休市日期，周末会自动排除。"
-                      : modal.kind === "portfolioOcr"
-                        ? "图片仅在浏览器本地识别。请核对结果后再批量更新账户资产。"
-                        : "为你的长期记录，设置清晰的起点。"}
+                    : modal.kind === "portfolioOcr"
+                      ? "图片仅在浏览器本地识别。请核对结果后再批量更新账户资产。"
+                      : modal.kind === "password"
+                        ? "修改后，其他设备上的登录会话将失效。"
+                      : "为你的长期记录，设置清晰的起点。"}
             </DialogDescription>
             {modal.kind === "entry" && (
               <EntryForm
@@ -2780,6 +2858,13 @@ export default function InvestmentApp() {
                     setBusy(false);
                   }
                 }}
+              />
+            )}
+            {modal.kind === "password" && (
+              <PasswordForm
+                busy={busy}
+                email={data.user?.email ?? ""}
+                onSubmit={changePassword}
               />
             )}
             {modal.kind === "holding" && (
@@ -5222,6 +5307,78 @@ function AccountDetail({
         </div>
       </section>
     </div>
+  );
+}
+
+function PasswordForm({
+  busy,
+  email,
+  onSubmit,
+}: {
+  busy: boolean;
+  email: string;
+  onSubmit: (currentPassword: string, newPassword: string) => Promise<void>;
+}) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  return (
+    <FormShell
+      busy={busy}
+      label="更新密码"
+      onSubmit={async () => {
+        if (newPassword.length < 8) throw Error("新密码至少需要 8 个字符");
+        if (newPassword !== confirmation)
+          throw Error("两次输入的新密码不一致");
+        await onSubmit(currentPassword, newPassword);
+      }}
+    >
+      <input
+        className="sr-only"
+        type="email"
+        autoComplete="username"
+        value={email}
+        tabIndex={-1}
+        readOnly
+        aria-hidden="true"
+      />
+      <div className="form-tip field-wide">
+        密码更新后，当前设备会保持登录，其他设备需要使用新密码重新登录。
+      </div>
+      <Field label="当前密码" wide>
+        <Input
+          type="password"
+          autoComplete="current-password"
+          maxLength={128}
+          value={currentPassword}
+          onChange={(event) => setCurrentPassword(event.target.value)}
+          required
+        />
+      </Field>
+      <Field label="新密码" wide>
+        <Input
+          type="password"
+          autoComplete="new-password"
+          minLength={8}
+          maxLength={128}
+          value={newPassword}
+          onChange={(event) => setNewPassword(event.target.value)}
+          placeholder="至少 8 个字符"
+          required
+        />
+      </Field>
+      <Field label="再次输入新密码" wide>
+        <Input
+          type="password"
+          autoComplete="new-password"
+          minLength={8}
+          maxLength={128}
+          value={confirmation}
+          onChange={(event) => setConfirmation(event.target.value)}
+          required
+        />
+      </Field>
+    </FormShell>
   );
 }
 
