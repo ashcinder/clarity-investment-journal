@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   parsePortfolioWords,
   wordsFromTsv,
-} from '../frontend/src/lib/portfolio-ocr.ts';
+} from '../../frontend/src/lib/portfolio-ocr.ts';
 
 const word = (text, x, y, width = 80, height = 24, confidence = 94) => ({
   text,

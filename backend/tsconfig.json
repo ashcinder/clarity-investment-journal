@@ -1,6 +1,6 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": { "incremental": false },
-  "include": ["src/**/*.ts", "cloud/**/*.ts", "../shared/**/*.ts"],
+  "include": ["src/**/*.ts", "cloud/**/*.ts", "shared/**/*.ts"],
   "exclude": ["data", "node_modules"]
 }

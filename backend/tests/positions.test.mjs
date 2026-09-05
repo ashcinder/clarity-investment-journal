@@ -19,7 +19,7 @@ import {
   deleteHolding,
   today,
 } from "../shared/ledger.ts";
-import { materializeAutomatic } from "../backend/src/automation.ts";
+import { materializeAutomatic } from "../src/automation.ts";
 const date = today();
 const input = (quantity, unitCost, unitPrice) => ({
   quantity,

@@ -1,6 +1,6 @@
 # Backend
 
-Node.js HTTP API + SQLite。后端不再托管前端网页；前端独立运行在 5173 端口。
+Node.js HTTP API + SQLite。本地开发时前后端分离；云服务器中后端可直接托管构建后的前端。
 
 ```bash
 cd backend
@@ -18,10 +18,13 @@ API 默认地址：http://127.0.0.1:4318 ，健康检查：`GET /api/health`。
 - `CLARITY_PORT`：后端端口，默认 4318。
 - `CLARITY_DB_PATH`：数据库绝对路径。
 - `CLARITY_FRONTEND_ORIGIN`：允许的前端来源，默认 `http://127.0.0.1:5173`。
+- `CLARITY_FRONTEND_DIR`：需要由后端托管的前端构建目录。
+- `CLARITY_PUBLIC_ORIGIN`：云服务器对外 HTTPS 来源。
+- `CLARITY_LOGIN_EMAIL`、`CLARITY_LOGIN_PASSWORD`、`CLARITY_SESSION_SECRET`：三项同时存在时启用密码登录。
 
 服务只监听本机地址，供个人本地使用。API 包括账本读写、清空、汇率查询和健康检查；后台每分钟检查自动定投。
 
-`src/server.mjs` 是独立后端入口，`src/automation.ts` 是定投逻辑。`cloud/` 保存线上 D1 API 和 Sites 登录适配；这些文件不由本地 Node 服务加载。线上使用的数据库迁移仍放在根目录 `drizzle/`，不要修改已应用的迁移。
+`src/server.mjs` 是独立服务器入口，可同时提供前端静态文件、密码登录、API 和 SQLite；`src/automation.ts` 是定投逻辑。`shared/` 保存共用计算，`cloud/` 保存 D1 API 和 Sites 登录适配。`scripts/` 收纳启动与清理脚本，`tests/` 收纳所有自动化验证。
 
 ## 本机来源
 

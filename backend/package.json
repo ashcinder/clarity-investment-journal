@@ -11,9 +11,6 @@
     "start": "node src/server.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
-  "dependencies": {
-    "@clarity/shared": "*"
-  },
   "devDependencies": {
     "typescript": "5.9.3",
     "@types/node": "22.19.19"

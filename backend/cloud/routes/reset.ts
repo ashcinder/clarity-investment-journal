@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "../chatgpt-auth";
-import { clearLedger, validateLedger } from "../../../shared/ledger";
+import { clearLedger, validateLedger } from "../../shared/ledger";
 import { validMutationSource } from "../request-security";
 export const dynamic = "force-dynamic";
 export async function POST(request: Request) {

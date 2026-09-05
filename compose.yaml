@@ -1,0 +1,20 @@
+name: clarity-investment-journal
+
+services:
+  clarity:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: clarity-investment-journal:latest
+    container_name: clarity-investment-journal
+    restart: unless-stopped
+    env_file:
+      - .env.server
+    ports:
+      - "127.0.0.1:4318:4318"
+    volumes:
+      - clarity-data:/data
+
+volumes:
+  clarity-data:
+    name: clarity-investment-data

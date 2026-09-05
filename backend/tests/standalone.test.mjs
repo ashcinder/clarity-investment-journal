@@ -28,7 +28,7 @@ test("separate frontend and backend proxy API, persist SQLite and support safe r
     child.stderr.on("data", (x) => (output += x));
     for (let i = 0; i < 60; i++) {
       if (child.exitCode !== null) throw Error(output);
-      if (output.includes("澄明后端已启动")) return;
+      if (output.includes("澄明服务已启动")) return;
       await new Promise((r) => setTimeout(r, 50));
     }
     throw Error("Server did not start: " + output);

@@ -1,7 +1,9 @@
 import http from "node:http";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { resolve, dirname, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   emptyLedger,
@@ -9,7 +11,7 @@ import {
   clearLedger,
   validDate,
   today,
-} from "../../shared/ledger.ts";
+} from "../shared/ledger.ts";
 import { materializeAutomatic } from "./automation.ts";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const port = Number(process.env.CLARITY_PORT || 4318);
@@ -18,6 +20,24 @@ if (!Number.isInteger(port) || port < 1 || port > 65535)
 const dbPath = resolve(
   process.env.CLARITY_DB_PATH || resolve(root, "data/clarity.sqlite"),
 );
+const frontendDir = process.env.CLARITY_FRONTEND_DIR
+  ? resolve(process.env.CLARITY_FRONTEND_DIR)
+  : "";
+const bindHost = process.env.CLARITY_BIND_HOST || "127.0.0.1";
+const publicOrigin = process.env.CLARITY_PUBLIC_ORIGIN
+  ? new URL(process.env.CLARITY_PUBLIC_ORIGIN)
+  : null;
+const loginEmail = process.env.CLARITY_LOGIN_EMAIL || "";
+const loginPassword = process.env.CLARITY_LOGIN_PASSWORD || "";
+const sessionSecret = process.env.CLARITY_SESSION_SECRET || "";
+const authValues = [loginEmail, loginPassword, sessionSecret].filter(Boolean);
+if (authValues.length > 0 && authValues.length < 3)
+  throw Error(
+    "登录配置不完整，请同时设置 CLARITY_LOGIN_EMAIL、CLARITY_LOGIN_PASSWORD 和 CLARITY_SESSION_SECRET",
+  );
+const authEnabled = authValues.length === 3;
+const sessionSeconds = 7 * 24 * 60 * 60;
+const loginFailures = new Map();
 mkdirSync(dirname(dbPath), { recursive: true });
 const db = new DatabaseSync(dbPath);
 db.exec(
@@ -53,14 +73,73 @@ const synchronize = () => {
     return { ...old, autoAdded: 0 };
   return { ...save(result.state, old.revision), autoAdded: result.added };
 };
-const json = (res, status, data) => {
+const securityHeaders = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "no-referrer",
+};
+const json = (res, status, data, headers = {}) => {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
-    "X-Content-Type-Options": "nosniff",
+    ...securityHeaders,
+    ...headers,
   });
   res.end(JSON.stringify(data));
 };
+const digest = (value) => createHash("sha256").update(value).digest();
+const sameText = (left, right) => timingSafeEqual(digest(left), digest(right));
+const signature = (payload) =>
+  createHmac("sha256", sessionSecret).update(payload).digest("base64url");
+const createSession = () => {
+  const payload = Buffer.from(
+    JSON.stringify({ email: loginEmail, expires: Date.now() + sessionSeconds * 1000 }),
+  ).toString("base64url");
+  return payload + "." + signature(payload);
+};
+const hasSession = (req) => {
+  if (!authEnabled) return true;
+  const cookie = (req.headers.cookie || "")
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("clarity_session="));
+  if (!cookie) return false;
+  const token = cookie.slice("clarity_session=".length);
+  const [payload, suppliedSignature, extra] = token.split(".");
+  if (!payload || !suppliedSignature || extra) return false;
+  if (!sameText(suppliedSignature, signature(payload))) return false;
+  try {
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString());
+    return session.email === loginEmail && session.expires > Date.now();
+  } catch {
+    return false;
+  }
+};
+const sessionCookie = (token, maxAge = sessionSeconds) =>
+  `clarity_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}` +
+  (publicOrigin?.protocol === "https:" ? "; Secure" : "");
+const mimeTypes = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+};
+async function staticFile(res, file, cache = true) {
+  const body = await readFile(file);
+  res.writeHead(200, {
+    "Content-Type": mimeTypes[extname(file).toLowerCase()] || "application/octet-stream",
+    "Cache-Control": cache ? "public, max-age=31536000, immutable" : "no-cache",
+    ...securityHeaders,
+  });
+  res.end(body);
+}
 async function bodyOf(req) {
   if (!req.headers["content-type"]?.startsWith("application/json"))
     throw Error("请使用 JSON 请求");
@@ -73,9 +152,12 @@ async function bodyOf(req) {
 }
 const server = http.createServer(async (req, res) => {
   try {
-    if (
-      !["127.0.0.1:" + port, "localhost:" + port].includes(req.headers.host)
-    ) {
+    const allowedHosts = new Set([
+      "127.0.0.1:" + port,
+      "localhost:" + port,
+      publicOrigin?.host,
+    ]);
+    if (!allowedHosts.has(req.headers.host)) {
       json(res, 403, { error: "只允许本机访问" });
       return;
     }
@@ -87,6 +169,7 @@ const server = http.createServer(async (req, res) => {
       process.env.CLARITY_FRONTEND_ORIGIN || "http://127.0.0.1:5173",
     );
     allowedOrigins.add(frontendOrigin.origin);
+    if (publicOrigin) allowedOrigins.add(publicOrigin.origin);
     if (["127.0.0.1", "localhost"].includes(frontendOrigin.hostname)) {
       const frontendPort = frontendOrigin.port ? ":" + frontendOrigin.port : "";
       allowedOrigins.add(
@@ -109,8 +192,67 @@ const server = http.createServer(async (req, res) => {
       });
       return;
     }
+    if (url.pathname === "/api/session" && req.method === "GET") {
+      json(res, 200, {
+        authenticated: hasSession(req),
+        authEnabled,
+        email: authEnabled ? loginEmail : null,
+      });
+      return;
+    }
+    if (url.pathname === "/api/login" && req.method === "POST") {
+      if (!authEnabled) {
+        json(res, 404, { error: "此环境未启用密码登录" });
+        return;
+      }
+      const client = req.socket.remoteAddress || "unknown";
+      const failed = loginFailures.get(client);
+      if (failed?.blockedUntil > Date.now()) {
+        json(res, 429, { error: "尝试次数过多，请稍后再试" });
+        return;
+      }
+      const body = await bodyOf(req);
+      const valid =
+        typeof body.email === "string" &&
+        typeof body.password === "string" &&
+        sameText(body.email.trim().toLowerCase(), loginEmail.toLowerCase()) &&
+        sameText(body.password, loginPassword);
+      if (!valid) {
+        const attempts = (failed?.attempts || 0) + 1;
+        loginFailures.set(client, {
+          attempts,
+          blockedUntil: attempts >= 5 ? Date.now() + 15 * 60 * 1000 : 0,
+        });
+        json(res, 401, { error: "邮箱或密码不正确" });
+        return;
+      }
+      loginFailures.delete(client);
+      json(
+        res,
+        200,
+        { authenticated: true, email: loginEmail },
+        { "Set-Cookie": sessionCookie(createSession()) },
+      );
+      return;
+    }
+    if (url.pathname === "/api/logout" && req.method === "POST") {
+      json(
+        res,
+        200,
+        { authenticated: false },
+        { "Set-Cookie": sessionCookie("", 0) },
+      );
+      return;
+    }
+    if (url.pathname.startsWith("/api/") && !hasSession(req)) {
+      json(res, 401, { error: "请先登录投资手账" });
+      return;
+    }
     if (url.pathname === "/api/ledger" && req.method === "GET") {
-      json(res, 200, synchronize());
+      json(res, 200, {
+        ...synchronize(),
+        authMode: authEnabled ? "password" : "none",
+      });
       return;
     }
     if (url.pathname === "/api/ledger" && req.method === "PUT") {
@@ -122,7 +264,11 @@ const server = http.createServer(async (req, res) => {
         res,
         saved ? 200 : 409,
         saved
-          ? { ...saved, autoAdded: result.added }
+          ? {
+              ...saved,
+              autoAdded: result.added,
+              authMode: authEnabled ? "password" : "none",
+            }
           : { error: "账本已更新，请刷新后保存" },
       );
       return;
@@ -143,7 +289,10 @@ const server = http.createServer(async (req, res) => {
       json(
         res,
         200,
-        save(clearLedger(old.state, body.keepAccounts), body.revision),
+        {
+          ...save(clearLedger(old.state, body.keepAccounts), body.revision),
+          authMode: authEnabled ? "password" : "none",
+        },
       );
       return;
     }
@@ -172,6 +321,28 @@ const server = http.createServer(async (req, res) => {
       json(res, 404, { error: "接口不存在" });
       return;
     }
+    if (frontendDir && ["GET", "HEAD"].includes(req.method || "")) {
+      const requested =
+        url.pathname === "/"
+          ? "index.html"
+          : decodeURIComponent(url.pathname).replace(/^\/+/, "");
+      const file = resolve(frontendDir, requested);
+      if (file !== frontendDir && !file.startsWith(frontendDir + sep)) {
+        json(res, 400, { error: "路径无效" });
+        return;
+      }
+      try {
+        if (!(await stat(file)).isFile()) throw Error("not a file");
+        await staticFile(res, file, requested === "index.html" ? false : true);
+      } catch {
+        if (extname(requested)) {
+          json(res, 404, { error: "文件不存在" });
+          return;
+        }
+        await staticFile(res, resolve(frontendDir, "index.html"), false);
+      }
+      return;
+    }
     if (url.pathname === "/") {
       json(res, 200, {
         service: "澄明 API",
@@ -193,9 +364,9 @@ const timer = setInterval(() => {
   }
 }, 60000);
 timer.unref();
-server.listen(port, "127.0.0.1", () => {
+server.listen(port, bindHost, () => {
   console.log(
-    `澄明后端已启动：http://127.0.0.1:${port}\nSQLite 数据库：${dbPath}\n按 Ctrl+C 停止。重启后数据保留。`,
+    `澄明服务已启动：http://${bindHost}:${port}\nSQLite 数据库：${dbPath}\n${authEnabled ? "密码登录已启用" : "密码登录未启用"}。按 Ctrl+C 停止。重启后数据保留。`,
   );
 });
 server.on("error", (error) => {

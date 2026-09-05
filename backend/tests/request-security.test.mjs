@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validMutationSource } from "../backend/cloud/request-security.ts";
+import { validMutationSource } from "../cloud/request-security.ts";
 
 const live = "https://clarity-investment-journal.example";
 const request = (url, headers = {}) =>

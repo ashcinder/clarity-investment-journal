@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "../chatgpt-auth";
-import { seedLedger, validateLedger } from "../../../shared/ledger";
+import { seedLedger, validateLedger } from "../../shared/ledger";
 import { materializeAutomatic } from "../../src/automation";
 import { validMutationSource } from "../request-security";
 export const dynamic = "force-dynamic";

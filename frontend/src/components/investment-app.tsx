@@ -35,6 +35,10 @@ import {
   Pause,
   Play,
   ShieldCheck,
+  LogIn,
+  LogOut,
+  Mail,
+  LockKeyhole,
   Menu,
   CircleHelp,
   CalendarCheck,
@@ -161,6 +165,7 @@ type ServerData = {
   revision: number;
   updatedAt: string;
   autoAdded?: number;
+  authMode?: "password" | "none";
 };
 const tzLabel = () => "北京时间";
 const frequency = (p: Plan) =>
@@ -263,6 +268,100 @@ function DownloadFile(name: string, data: string, type: string) {
 const errorText = (e: unknown) =>
   e instanceof Error ? e.message : "操作失败，请重试";
 class LedgerConflictError extends Error {}
+function LoginScreen({
+  busy,
+  error,
+  onLogin,
+}: {
+  busy: boolean;
+  error: string;
+  onLogin: (email: string, password: string) => Promise<void>;
+}) {
+  const [email, setEmail] = useState("tangyucinder@gmail.com");
+  const [password, setPassword] = useState("");
+  const [formError, setFormError] = useState("");
+  return (
+    <main className="login-page">
+      <section className="login-story" aria-hidden="true">
+        <div className="login-brand">
+          <Sprout size={30} />
+          <span>
+            澄明 <small>CLARITY / 投资手账</small>
+          </span>
+        </div>
+        <div className="login-copy">
+          <span>LONG-TERM THINKING</span>
+          <h1>让每一笔投入，都有清晰的回响。</h1>
+          <p>多账户、双币种、收益记录与定投计划，只属于你的财务空间。</p>
+        </div>
+        <div className="login-orbit">
+          <i />
+          <i />
+          <i />
+          <strong>时间</strong>
+        </div>
+      </section>
+      <section className="login-panel">
+        <form
+          className="login-card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setFormError("");
+            void onLogin(email, password).catch((cause) =>
+              setFormError(errorText(cause)),
+            );
+          }}
+        >
+          <span className="login-mark">
+            <LogIn size={23} />
+          </span>
+          <div>
+            <p className="eyebrow">私人投资空间</p>
+            <h2>欢迎回来</h2>
+            <p>登录后继续记录你的资产与长期计划。</p>
+          </div>
+          <label htmlFor="login-email">
+            <span>登录邮箱</span>
+            <span className="login-input">
+              <Mail size={17} />
+              <Input
+                id="login-email"
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
+            </span>
+          </label>
+          <label htmlFor="login-password">
+            <span>密码</span>
+            <span className="login-input">
+              <LockKeyhole size={17} />
+              <Input
+                id="login-password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
+            </span>
+          </label>
+          {(formError || error) && (
+            <p className="login-error">{formError || error}</p>
+          )}
+          <Button type="submit" className="primary-button" disabled={busy}>
+            {busy ? "正在验证…" : "进入我的账本"}
+          </Button>
+          <small className="login-security">
+            <ShieldCheck size={13} /> 登录状态由服务器加密验证
+          </small>
+        </form>
+      </section>
+    </main>
+  );
+}
 export default function InvestmentApp() {
   const [data, setData] = useState<ServerData | null>(null);
   const [minute, setMinute] = useState(() => Date.now());
@@ -271,6 +370,8 @@ export default function InvestmentApp() {
     return () => clearInterval(timer);
   }, []);
   const [loadError, setLoadError] = useState("");
+  const [authRequired, setAuthRequired] = useState(false);
+  const [passwordAuth, setPasswordAuth] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [modal, setModal] = useState<Modal | null>(null);
   const [busy, setBusy] = useState(false);
@@ -320,6 +421,7 @@ export default function InvestmentApp() {
           : Error(body.error);
       dataRef.current = body;
       setData(body);
+      setPasswordAuth(body.authMode === "password");
       setNotice(message);
     } finally {
       saving.current = false;
@@ -372,6 +474,20 @@ export default function InvestmentApp() {
     try {
       const response = await fetch("/api/ledger");
       const body = (await response.json()) as ServerData & { error: string };
+      if (response.status === 401) {
+        const sessionResponse = await fetch("/api/session");
+        if (sessionResponse.ok) {
+          const session = (await sessionResponse.json()) as {
+            authEnabled: boolean;
+          };
+          if (session.authEnabled) {
+            setAuthRequired(true);
+            setPasswordAuth(true);
+            setLoadError("");
+            return;
+          }
+        }
+      }
       if (!response.ok) throw Error(body.error);
       if (
         saving.current ||
@@ -380,6 +496,8 @@ export default function InvestmentApp() {
         return;
       dataRef.current = body;
       setData(body);
+      setAuthRequired(false);
+      setPasswordAuth(body.authMode === "password");
       setLoadError("");
       if (body.autoAdded) setNotice(`已自动补记 ${body.autoAdded} 笔定投`);
       if (body.state.settings.autoFx && fxAt(body.state).date < today())
@@ -633,6 +751,38 @@ export default function InvestmentApp() {
       throw e;
     }
   };
+  async function login(email: string, password: string) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw Error(result.error || "登录失败");
+      setAuthRequired(false);
+      setLoadError("");
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function logout() {
+    setBusy(true);
+    try {
+      await fetch("/api/logout", { method: "POST" });
+      dataRef.current = null;
+      setData(null);
+      setAuthRequired(true);
+      setModal(null);
+      setDetailId(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (authRequired)
+    return <LoginScreen busy={busy} error={loadError} onLogin={login} />;
   return (
     <div className="app-shell">
       <aside className={"sidebar" + (mobile ? " mobile-open" : "")}>
@@ -675,6 +825,18 @@ export default function InvestmentApp() {
               <ShieldCheck size={10} /> 独立私有空间
             </small>
           </div>
+          {passwordAuth && (
+            <button
+              type="button"
+              className="logout-button"
+              aria-label="退出登录"
+              title="退出登录"
+              disabled={busy}
+              onClick={() => void logout()}
+            >
+              <LogOut size={15} />
+            </button>
+          )}
         </div>
       </aside>
       {mobile && (

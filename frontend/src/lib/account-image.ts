@@ -1,7 +1,7 @@
 import {
   ACCOUNT_IMAGE_MAX_LENGTH,
   validAccountImage,
-} from '../../../shared/account-image';
+} from '../../../backend/shared/account-image';
 
 export async function prepareAccountImage(file: File): Promise<string> {
   const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name);

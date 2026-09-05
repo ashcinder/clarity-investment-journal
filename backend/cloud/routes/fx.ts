@@ -1,5 +1,5 @@
 import { getChatGPTUser } from '../chatgpt-auth';
-import { validDate, today } from '../../../shared/ledger';
+import { validDate, today } from '../../shared/ledger';
 export const dynamic = 'force-dynamic';
 export async function GET() {
   if (!(await getChatGPTUser()))

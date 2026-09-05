@@ -8,6 +8,7 @@ React + TypeScript 前端，Node.js + SQLite 独立后端；同时保留已发�
 
 ```text
 现代化理财/
+├── app/                  已发布 Sites 的极薄入口
 ├── frontend/             React + Vite 前端
 │   ├── src/components/   页面和 UI 组件
 │   ├── src/styles/       样式
@@ -16,16 +17,19 @@ React + TypeScript 前端，Node.js + SQLite 独立后端；同时保留已发�
 ├── backend/              Node.js + SQLite 后端
 │   ├── src/server.mjs    HTTP API 入口
 │   ├── src/automation.ts 自动定投
+│   ├── shared/           前后端共用的计算与校验
 │   ├── data/             持久化 SQLite 数据库
-│   ├── cloud/            线上 D1 / Sites 后端适配
+│   ├── cloud/            D1 与 Sites 后端适配
+│   ├── scripts/          启动和清理脚本
+│   ├── tests/            前后端与计算测试
 │   └── package.json
-├── shared/               共用的数据类型、计算和校验
-├── app/                  线上框架所需的薄路由入口
-├── scripts/              一键启动与清理脚本
-├── tests/                前后端与计算测试
-├── app/ + drizzle/       线上部署所需的薄适配层
+├── drizzle/              Sites D1 数据库迁移
+├── Dockerfile            云服务器生产镜像
+├── compose.yaml          云服务器启动与数据卷
 └── package.json          工作区与统一命令
 ```
+
+根目录只保留 `app`、`frontend`、`backend`、`drizzle` 四个可见源码文件夹。共用计算收纳在 `backend/shared/`。`node_modules` 是安装后生成的依赖目录，已在编辑器配置中隐藏，不属于项目结构。
 
 需要 **Node.js 22.18+**（建议 24 或更新版本）。首次在项目根目录安装依赖：
 
@@ -69,6 +73,18 @@ macOS 可双击 **启动理财账本.command**。按 `Ctrl+C` 停止。`npm run 
 可在根目录启动时设置 `CLARITY_PORT`（后端）、`CLARITY_FRONTEND_PORT`（前端）和 `CLARITY_DB_PATH`（数据库绝对路径）。单独启动前端时，`CLARITY_API_URL` 可指定后端地址；自定义前端端口时，还需给后端设置 `CLARITY_FRONTEND_ORIGIN`。更多说明见 `frontend/README.md` 和 `backend/README.md`。
 
 前后端默认只监听本机，用于单用户个人账本。线上使用 Sites 登录与 D1；本地和线上数据独立，可通过 JSON 导入/导出迁移。
+
+## 独立云服务器与登录
+
+`Dockerfile` 会构建前端，并由同一个 Node.js 服务提供静态页面和 `/api/*`。`compose.yaml` 只将应用绑定到服务器回环端口 4318，再由 Nginx 通过 HTTPS 对外提供服务。SQLite 保存在独立的 `clarity-investment-data` Docker 数据卷中，更新镜像或重启服务器不会删除账本。
+
+复制 `.env.server.example` 为 `.env.server`，填写服务器地址、登录邮箱、登录密码和随机会话密钥，然后执行：
+
+```bash
+docker compose up -d --build
+```
+
+启用后，未登录用户无法读写账本 API。登录成功后服务器签发 7 天有效的 `HttpOnly` 签名 Cookie，前端无法读取密码或会话内容。连续失败 5 次会暂停该来源 15 分钟。点击左下角退出按钮可立即清除会话。
 
 ## 自定义账户图片
 
@@ -126,19 +142,22 @@ SVG 上传后通过浏览器的独立图片上下文转换为静态缩略图（�
 
 ## 后端 API
 
-所有业务 API 在 `backend/` 中；根目录 `app/api/` 只将线上请求转发到 `backend/cloud/routes/`。前端不会导入数据库或后端服务代码。`shared/ledger.ts` 为前后端共用的纯计算模块。
+所有业务 API 在 `backend/` 中；根目录 `app/api/` 只将 Sites 请求转发到 `backend/cloud/routes/`。前端不会导入数库或后端服务代码。`backend/shared/ledger.ts` 为前后端共用的纯计算模块。
 
 独立后端 API：
 
 | 方法 | 路径          | 功能                                                                    |
 | ---- | ------------- | ----------------------------------------------------------------------- |
-| GET  | `/api/health` | 本地运行状态                                                            |
+| GET  | `/api/health` | 运行状态                                                                |
+| GET  | `/api/session` | 检查独立服务器登录状态                                            |
+| POST | `/api/login` | 邮箱密码登录                                                            |
+| POST | `/api/logout` | 退出并清除会话                                                        |
 | GET  | `/api/ledger` | 读取账本并补记到期定投                                                  |
 | PUT  | `/api/ledger` | 保存完整账本，参数 `{state, revision}`                                  |
 | POST | `/api/reset`  | 清空，参数 `{revision, confirmation: "清空", keepAccounts: true/false}` |
 | GET  | `/api/fx`     | 获取 USD/CNY 参考汇率                                                   |
 
-保存与清空都使用版本号防止覆盖较新的数据；来源校验、金额和引用校验在后端执行。SQLite 启动时自动建表，线上 D1 通过迁移建表。请不要修改已应用的 `drizzle/0000_funny_tombstone.sql`。
+保存与清空都使用版本号防止覆盖较新的数据；登录、来源、金额和引用校验均在后端执行。SQLite 启动时自动建表，Sites D1 通过 `drizzle/` 内的迁移建表。
 
 ## 开发与验证
 
@@ -158,7 +177,7 @@ npm run typecheck
 npm run build:site
 ```
 
-领域和独立后端测试共 65 项，覆盖持仓数量、市值、网格权益、多资产分类、组合定投分配、收益、汇率、交易日历、暂停 / 恢复 / 删除后的计划看板同步、截图识别结果解析、自动定投、跨日、持久化重启、版本冲突与两种清空模式。分离架构测试使用临时数据库、后端端口 44318 和前端端口 44319，不接触个人账本；测试前先执行 `npm run build`。它会验证前端页面、API 代理读写、后端重启和清空。
+领域和独立后端测试共 66 项，覆盖持仓数量、市值、网格权益、多资产分类、组合定投分配、收益、汇率、交易日历、暂停 / 恢复 / 删除后的计划看板同步、截图识别结果解析、密码登录与会话保护、自动定投、跨日、持久化重启、版本冲突与两种清空模式。分离架构测试使用临时数据库，不接触个人账本；测试前先执行 `npm run build`。
 
 线上架构本地开发（可选，日常使用独立版无需执行）：
 

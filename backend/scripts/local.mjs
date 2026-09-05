@@ -2,9 +2,9 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
-const root = fileURLToPath(new URL("../", import.meta.url));
+const root = fileURLToPath(new URL("../../", import.meta.url));
 const require = createRequire(
-  new URL("../frontend/package.json", import.meta.url),
+  new URL("../../frontend/package.json", import.meta.url),
 );
 const vite = resolve(
   dirname(require.resolve("vite/package.json")),

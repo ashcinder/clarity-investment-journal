@@ -1,2 +1,2 @@
 // Shared, browser-safe domain types and calculations.
-export * from "../../../shared/ledger";
+export * from "../../../backend/shared/ledger";

@@ -1,0 +1,14 @@
+.git
+.openai
+.vscode
+node_modules
+frontend/dist
+backend/data
+dist
+.next
+.vinext
+.wrangler
+outputs
+*.zip
+*.sqlite*
+.env*

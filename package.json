@@ -6,21 +6,23 @@
     "node": ">=22.18.0"
   },
   "scripts": {
-    "dev": "node scripts/local.mjs --dev",
+    "dev": "node backend/scripts/local.mjs --dev",
     "build": "npm run build --workspace frontend",
-    "start": "node scripts/local.mjs --start",
-    "clean": "node scripts/clean.mjs",
+    "start": "node backend/scripts/local.mjs --start",
+    "clean": "node backend/scripts/clean.mjs",
     "lint": "oxlint",
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --test backend/tests/*.test.mjs",
     "db:local": "wrangler d1 migrations apply site-creator-d1 --local --config wrangler.local.json",
-    "local": "node scripts/local.mjs",
+    "local": "node backend/scripts/local.mjs",
     "local:build": "npm run build",
     "local:start": "npm run start",
     "local:dev": "npm run dev",
-    "test:standalone": "node tests/standalone.test.mjs",
+    "test:standalone": "node backend/tests/standalone.test.mjs",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
     "dev:frontend": "npm run dev --workspace frontend",
     "dev:backend": "npm run dev --workspace backend",
     "dev:site": "vinext dev",
@@ -56,7 +58,6 @@
   "type": "module",
   "workspaces": [
     "frontend",
-    "backend",
-    "shared"
+    "backend"
   ]
 }

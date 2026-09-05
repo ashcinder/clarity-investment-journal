@@ -22,7 +22,7 @@ import {
   materializeAutomatic,
   upgradeLedger,
   scheduledInstant,
-} from "../backend/src/automation.ts";
+} from "../src/automation.ts";
 const date = "2026-09-04";
 function fixture() {
   const s = seedLedger(date);

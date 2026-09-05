@@ -20,4 +20,4 @@ npm run start
 
 `CLARITY_API_URL` 可指定后端地址，`CLARITY_FRONTEND_PORT` 可指定前端端口。可以通过终端环境变量或 `frontend/.env.local` 设置。更改端口后须同步后端的 `CLARITY_FRONTEND_ORIGIN`。
 
-共享类型和资产计算来自 `../shared/ledger.ts`；主界面入口为 `src/components/investment-app.tsx`。
+共享类型和资产计算来自 `../backend/shared/ledger.ts`；主界面入口为 `src/components/investment-app.tsx`。
