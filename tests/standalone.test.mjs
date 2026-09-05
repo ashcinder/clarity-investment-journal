@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recordPosition, today } from "../shared/ledger.ts";
 test("separate frontend and backend proxy API, persist SQLite and support safe reset", async () => {
-  const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
+  const image =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
   const dir = await mkdtemp(join(tmpdir(), "clarity-test-"));
   const origin = "http://127.0.0.1:44318";
   let child;
@@ -73,6 +74,32 @@ test("separate frontend and backend proxy API, persist SQLite and support safe r
     assert.equal(page.status, 200);
     assert.match(await page.text(), /<div id="root">/);
     assert.equal((await fetch(frontendOrigin + "/api/health")).status, 200);
+    assert.equal(
+      (
+        await fetch(frontendOrigin + "/api/ledger", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Origin: "http://localhost:44319",
+          },
+          body: "{}",
+        })
+      ).status,
+      400,
+    );
+    assert.equal(
+      (
+        await fetch(frontendOrigin + "/api/ledger", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Origin: "http://evil.example",
+          },
+          body: "{}",
+        })
+      ).status,
+      403,
+    );
     assert.equal((await fetch(origin + "/")).status, 200);
     assert.equal((await fetch(origin + "/api/health")).status, 200);
     let d = await get();

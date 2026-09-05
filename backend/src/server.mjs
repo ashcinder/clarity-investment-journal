@@ -79,14 +79,24 @@ const server = http.createServer(async (req, res) => {
       json(res, 403, { error: "只允许本机访问" });
       return;
     }
-    const allowedOrigins = [
+    const allowedOrigins = new Set([
       "http://127.0.0.1:" + port,
       "http://localhost:" + port,
-    ];
-    allowedOrigins.push(
+    ]);
+    const frontendOrigin = new URL(
       process.env.CLARITY_FRONTEND_ORIGIN || "http://127.0.0.1:5173",
     );
-    if (req.headers.origin && !allowedOrigins.includes(req.headers.origin)) {
+    allowedOrigins.add(frontendOrigin.origin);
+    if (["127.0.0.1", "localhost"].includes(frontendOrigin.hostname)) {
+      const frontendPort = frontendOrigin.port ? ":" + frontendOrigin.port : "";
+      allowedOrigins.add(
+        `${frontendOrigin.protocol}//127.0.0.1${frontendPort}`,
+      );
+      allowedOrigins.add(
+        `${frontendOrigin.protocol}//localhost${frontendPort}`,
+      );
+    }
+    if (req.headers.origin && !allowedOrigins.has(req.headers.origin)) {
       json(res, 403, { error: "请求来源无效" });
       return;
     }

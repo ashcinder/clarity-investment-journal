@@ -9,6 +9,7 @@
     "dev": "node scripts/local.mjs --dev",
     "build": "npm run build --workspace frontend",
     "start": "node scripts/local.mjs --start",
+    "clean": "node scripts/clean.mjs",
     "lint": "oxlint",
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate",

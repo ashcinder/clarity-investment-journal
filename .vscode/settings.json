@@ -1,0 +1,14 @@
+{
+  "files.exclude": {
+    "**/.next": true,
+    "**/.vinext": true,
+    "**/.wrangler": true,
+    "**/dist": true,
+    "**/node_modules": true,
+    "**/*.tsbuildinfo": true
+  },
+  "search.exclude": {
+    "**/dist": true,
+    "**/node_modules": true
+  }
+}

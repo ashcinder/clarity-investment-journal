@@ -12,7 +12,6 @@ React + TypeScript 前端，Node.js + SQLite 独立后端；同时保留已发�
 │   ├── src/components/   页面和 UI 组件
 │   ├── src/styles/       样式
 │   ├── public/           图片和图标
-│   ├── dist/             前端构建产物
 │   └── package.json
 ├── backend/              Node.js + SQLite 后端
 │   ├── src/server.mjs    HTTP API 入口
@@ -22,7 +21,9 @@ React + TypeScript 前端，Node.js + SQLite 独立后端；同时保留已发�
 │   └── package.json
 ├── shared/               共用的数据类型、计算和校验
 ├── app/                  线上框架所需的薄路由入口
-├── scripts/              一键启动
+├── scripts/              一键启动与清理脚本
+├── tests/                前后端与计算测试
+├── app/ + drizzle/       线上部署所需的薄适配层
 └── package.json          工作区与统一命令
 ```
 
@@ -36,7 +37,7 @@ npm run dev
 
 这会同时启动两个独立进程：
 
-- **前端页面：http://127.0.0.1:5173/**
+- **前端页面：http://127.0.0.1:5173/**（`http://localhost:5173/` 也支持）
 - **后端 API：http://127.0.0.1:4318/api/health**
 
 前端将 `/api/*` 代理给后端，后端不托管网页。原来的 `4318` 现在是纯 API 地址，使用网页请打开 `5173`。
@@ -58,6 +59,8 @@ npm run dev
 构建后运行：根目录执行 `npm run local` 会构建前端并同时启动前端预览和后端；已有构建时执行 `npm start`。也可分别在 `frontend/` 执行 `npm run build && npm start`，在 `backend/` 执行 `npm start`。
 
 macOS 可双击 **启动理财账本.command**。按 `Ctrl+C` 停止。`npm run local:dev`、`npm run local:build`、`npm run local:start` 保留为兼容命令。
+
+根目录中的 `.next`、`.vinext`、`.wrangler`、`dist`、`outputs` 和 `*.tsbuildinfo` 都是临时构建文件，不是项目源码。执行 `npm run clean` 可安全移除它们，不会删除 `frontend`、`backend` 或 `backend/data` 中的本地数据库。`node_modules` 是安装依赖，编辑器配置会默认隐藏它。
 
 本地服务无需 Cloudflare 账户、ChatGPT 登录、API Key 或手动建表。首次本地账本为空，先创建账户再添加资产。
 
