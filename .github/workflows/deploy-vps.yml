@@ -1,0 +1,64 @@
+name: Deploy to private VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clarity-vps-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure deployment key
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/clarity_deploy
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/clarity_deploy ~/.ssh/known_hosts
+
+      - name: Package source
+        run: |
+          tar \
+            --exclude=.git \
+            --exclude=.env.server \
+            --exclude=backend/data \
+            --exclude=node_modules \
+            --exclude=dist \
+            --exclude=frontend/dist \
+            -czf "/tmp/clarity-${GITHUB_SHA}.tar.gz" .
+
+      - name: Upload release
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          scp \
+            -i ~/.ssh/clarity_deploy \
+            -o BatchMode=yes \
+            "/tmp/clarity-${GITHUB_SHA}.tar.gz" \
+            "${VPS_USER}@${VPS_HOST}:/tmp/clarity-${GITHUB_SHA}.tar.gz"
+
+      - name: Build and switch release
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh \
+            -i ~/.ssh/clarity_deploy \
+            -o BatchMode=yes \
+            "${VPS_USER}@${VPS_HOST}" \
+            "sudo mkdir -p '/opt/clarity/releases/${GITHUB_SHA}' && sudo tar -xzf '/tmp/clarity-${GITHUB_SHA}.tar.gz' -C '/opt/clarity/releases/${GITHUB_SHA}' && sudo bash '/opt/clarity/releases/${GITHUB_SHA}/backend/deploy/server-deploy.sh' '/opt/clarity/releases/${GITHUB_SHA}'"
