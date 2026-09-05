@@ -14,6 +14,9 @@ import {
   validateLedger,
   scheduledDates,
   planAccountAmount,
+  planAccountAllocations,
+  planEntryKeys,
+  occurrences,
 } from "../shared/ledger.ts";
 import {
   materializeAutomatic,
@@ -191,6 +194,114 @@ test("automatic deposits target the correct holding and manual plans do not auto
     materializeAutomatic(s, new Date("2026-09-04T10:00:00Z")).added,
     0,
   );
+});
+test("one automatic plan distributes fixed amounts across multiple assets", () => {
+  const s = fixture();
+  const btc = holding(s, "BTC");
+  const eth = holding(s, "ETH");
+  s.plans = [
+    plan({
+      amount: 60,
+      allocationMode: "amounts",
+      allocations: [
+        { holdingId: btc.id, amount: 40 },
+        { holdingId: eth.id, amount: 20 },
+      ],
+    }),
+  ];
+  validateLedger(s);
+  const { state, added } = materializeAutomatic(
+    s,
+    new Date("2026-09-04T10:00:00Z"),
+  );
+  assert.equal(added, 8);
+  assert.equal(holdingStats(state, btc).value, 160);
+  assert.equal(holdingStats(state, eth).value, 80);
+  assert.equal(new Set(state.entries.filter((e) => e.automatic).map((e) => e.planKey)).size, 8);
+  assert.equal(
+    materializeAutomatic(state, new Date("2026-09-04T10:00:00Z")).added,
+    0,
+  );
+});
+test("ratio plans split the total exactly and complete only after every asset", () => {
+  const s = fixture();
+  const btc = holding(s, "BTC");
+  const eth = holding(s, "ETH");
+  const p = plan({
+    amount: 100,
+    allocationMode: "ratios",
+    allocations: [
+      { holdingId: btc.id, ratio: 33.33 },
+      { holdingId: eth.id, ratio: 66.67 },
+    ],
+  });
+  s.plans = [p];
+  validateLedger(s);
+  assert.deepEqual(
+    planAccountAllocations(s, p, date).map((item) => item.amount),
+    [33.33, 66.67],
+  );
+  const keys = planEntryKeys(p, date);
+  s.entries.push({
+    id: "partial-plan",
+    accountId: p.accountId,
+    holdingId: btc.id,
+    kind: "deposit",
+    amount: 33.33,
+    date,
+    fx: 7.12,
+    note: "partial",
+    createdAt: new Date().toISOString(),
+    planKey: keys[0],
+  });
+  assert.equal(occurrences(s, date, date).find((o) => o.date === date).done, false);
+  const completed = materializeAutomatic(
+    s,
+    new Date("2026-09-04T10:00:00Z"),
+  );
+  assert.equal(completed.added, 7);
+  assert.equal(
+    occurrences(completed.state, date, date).find((o) => o.date === date).done,
+    true,
+  );
+  assert.throws(
+    () =>
+      validateLedger({
+        ...s,
+        plans: [
+          {
+            ...p,
+            allocations: [
+              { holdingId: btc.id, ratio: 40 },
+              { holdingId: eth.id, ratio: 50 },
+            ],
+          },
+        ],
+      }),
+    /100%/,
+  );
+});
+test("multi-asset plans reject mixed market calendars and are removed with a target", () => {
+  const s = fixture();
+  const btc = holding(s, "BTC");
+  const spy = holding(s, "SPY");
+  spy.assetType = "stock";
+  s.plans = [
+    plan({
+      amount: 100,
+      allocationMode: "ratios",
+      allocations: [
+        { holdingId: btc.id, ratio: 50 },
+        { holdingId: spy.id, ratio: 50 },
+      ],
+    }),
+  ];
+  assert.throws(() => validateLedger(s), /相同市场日历/);
+  spy.assetType = "crypto";
+  validateLedger(s);
+  deleteHolding(s, btc);
+  assert.equal(s.plans.length, 0);
+  validateLedger(s);
 });
 test("US plans execute at the same Beijing time throughout the year", () => {
   assert.equal(

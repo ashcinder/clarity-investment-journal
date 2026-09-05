@@ -47,6 +47,12 @@ export type Entry = {
 };
 export type Plan = {
   currency?: Currency;
+  allocationMode?: "amounts" | "ratios";
+  allocations?: Array<{
+    holdingId: string;
+    amount?: number;
+    ratio?: number;
+  }>;
   id: string;
   accountId: string;
   name: string;
@@ -692,6 +698,38 @@ export function scheduledDates(
   }
   return [...result].sort();
 }
+
+export function planHoldingIds(plan: Plan): string[] {
+  return plan.allocations?.map((allocation) => allocation.holdingId) ??
+    (plan.holdingId ? [plan.holdingId] : []);
+}
+
+export function planEntryKeys(plan: Plan, date: string): string[] {
+  const root = plan.id + ":" + date;
+  return plan.allocations?.map((_, index) => root + ":" + index) ?? [root];
+}
+
+export function planCurrencyAllocations(
+  plan: Plan,
+): Array<{ holdingId?: string; amount: number }> {
+  if (!plan.allocations)
+    return [{ ...(plan.holdingId ? { holdingId: plan.holdingId } : {}), amount: plan.amount }];
+  if (plan.allocationMode === "amounts")
+    return plan.allocations.map((allocation) => ({
+      holdingId: allocation.holdingId,
+      amount: allocation.amount!,
+    }));
+  let allocated = 0;
+  return plan.allocations.map((allocation, index) => {
+    const amount =
+      index === plan.allocations!.length - 1
+        ? round(plan.amount - allocated)
+        : round((plan.amount * allocation.ratio!) / 100);
+    allocated = round(allocated + amount);
+    return { holdingId: allocation.holdingId, amount };
+  });
+}
+
 export function occurrences(
   state: Ledger,
   from: string,
@@ -703,8 +741,9 @@ export function occurrences(
       if (
         !account ||
         account.archived ||
-        (plan.holdingId &&
-          (state.holdings ?? []).find((h) => h.id === plan.holdingId)?.archived)
+        planHoldingIds(plan).some(
+          (id) => (state.holdings ?? []).find((h) => h.id === id)?.archived,
+        )
       )
         return [];
       return scheduledDates(plan, from, to, state.calendar).map((date) => {
@@ -714,7 +753,9 @@ export function occurrences(
           account,
           date,
           key,
-          done: state.entries.some((e) => e.planKey === key),
+          done: planEntryKeys(plan, date).every((entryKey) =>
+            state.entries.some((e) => e.planKey === entryKey),
+          ),
           skipped: state.skipped.includes(key),
         };
       });
@@ -968,6 +1009,53 @@ export function validateLedger(input: unknown): Ledger {
       assert(["auto", "manual"].includes(p.mode), "记账方式无效");
     if (p.autoFrom !== undefined)
       assert(validDate(p.autoFrom), "自动开始日期无效");
+    if (p.allocations !== undefined) {
+      assert(
+        ["amounts", "ratios"].includes(p.allocationMode ?? "") &&
+          p.allocations.length > 0 &&
+          p.allocations.length <= 100,
+        "定投资产分配无效",
+      );
+      const allocationIds = new Set<string>();
+      for (const allocation of p.allocations) {
+        assert(
+          str(allocation.holdingId, 100) &&
+            !allocationIds.has(allocation.holdingId) &&
+            holdingIds.has(allocation.holdingId) &&
+            (s.holdings ?? []).find((h) => h.id === allocation.holdingId)
+              ?.accountId === p.accountId,
+          "定投资产必须唯一且属于所选账户",
+        );
+        allocationIds.add(allocation.holdingId);
+        if (p.allocationMode === "amounts")
+          assert(
+            num(allocation.amount, 0.01) && allocation.ratio === undefined,
+            "每项定投金额必须大于 0",
+          );
+        else
+          assert(
+            num(allocation.ratio, 0.0001, 100) &&
+              allocation.amount === undefined,
+            "定投占比必须大于 0 且不超过 100%",
+          );
+      }
+      if (p.allocationMode === "amounts")
+        assert(
+          round(
+            p.allocations.reduce((sum, allocation) => sum + allocation.amount!, 0),
+          ) === round(p.amount),
+          "各资产定投金额之和必须等于计划总额",
+        );
+      else
+        assert(
+          Math.abs(
+            p.allocations.reduce((sum, allocation) => sum + allocation.ratio!, 0) -
+              100,
+          ) < 0.0001,
+          "各资产定投占比合计必须为 100%",
+        );
+      assert(p.holdingId === undefined, "组合定投不能同时设置旧版单一标的");
+    } else assert(p.allocationMode === undefined, "定投资产分配无效");
     if (p.holdingId)
       assert(
         holdingIds.has(p.holdingId) &&
@@ -976,9 +1064,21 @@ export function validateLedger(input: unknown): Ledger {
         "定投标的必须属于所选账户",
       );
     const a = s.accounts.find((a) => a.id === p.accountId)!;
-    const assetType =
-      (s.holdings ?? []).find((h) => h.id === p.holdingId)?.assetType ??
-      a.category;
+    const selectedHoldings = planHoldingIds(p).map(
+      (id) => (s.holdings ?? []).find((h) => h.id === id)!,
+    );
+    const assetTypes = selectedHoldings.length
+      ? selectedHoldings.map((h) => h.assetType ?? a.category)
+      : [a.category];
+    assert(
+      new Set(
+        assetTypes.map((type) =>
+          type === "fund" ? "CN" : type === "stock" ? "US" : "CRYPTO",
+        ),
+      ).size === 1,
+      "同一定投计划中的资产必须使用相同市场日历",
+    );
+    const assetType = assetTypes[0];
     assert(
       p.market ===
         (assetType === "fund" ? "CN" : assetType === "stock" ? "US" : "CRYPTO"),
@@ -1225,7 +1325,9 @@ export function deleteHolding(state: Ledger, holding: Holding): void {
   );
   const buckets = new Map<string, number>();
   const removedPlans = new Set(
-    state.plans.filter((p) => p.holdingId === holding.id).map((p) => p.id),
+    state.plans
+      .filter((p) => planHoldingIds(p).includes(holding.id))
+      .map((p) => p.id),
   );
   const retained: Entry[] = [];
   for (const entry of sortedEntries(state.entries)) {
@@ -1248,7 +1350,9 @@ export function deleteHolding(state: Ledger, holding: Holding): void {
   }
   state.entries = retained;
   state.holdings = state.holdings?.filter((h) => h.id !== holding.id);
-  state.plans = state.plans.filter((p) => p.holdingId !== holding.id);
+  state.plans = state.plans.filter(
+    (p) => !planHoldingIds(p).includes(holding.id),
+  );
   state.skipped = state.skipped.filter(
     (k) => ![...removedPlans].some((id) => k.startsWith(id + ":")),
   );
@@ -1269,6 +1373,37 @@ export function planAccountAmount(
       fxAt(state, date).rate,
     ),
   );
+}
+
+export function planAccountAllocations(
+  state: Ledger,
+  plan: Plan,
+  date = today(),
+): Array<{ holdingId?: string; amount: number; plannedAmount: number }> {
+  const account = state.accounts.find((a) => a.id === plan.accountId);
+  if (!account) throw Error("定投账户不存在");
+  const allocations = planCurrencyAllocations(plan);
+  const total = planAccountAmount(state, plan, date);
+  let allocated = 0;
+  return allocations.map((allocation, index) => {
+    const amount =
+      index === allocations.length - 1
+        ? round(total - allocated)
+        : round(
+            convert(
+              allocation.amount,
+              plan.currency ?? account.currency,
+              account.currency,
+              fxAt(state, date).rate,
+            ),
+          );
+    allocated = round(allocated + amount);
+    return {
+      ...(allocation.holdingId ? { holdingId: allocation.holdingId } : {}),
+      amount,
+      plannedAmount: allocation.amount,
+    };
+  });
 }
 
 export function assetType(state: Ledger, h: Holding): Category {

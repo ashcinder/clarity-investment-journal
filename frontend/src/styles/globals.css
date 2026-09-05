@@ -1301,6 +1301,20 @@ h1 > span {
   font-weight: 400;
   letter-spacing: 0;
 }
+.plan-allocation-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -3px 0 13px;
+}
+.plan-allocation-summary span {
+  font-size: 9px;
+  color: #69877f;
+  background: #f0f6f4;
+  border: 1px solid #e0ece8;
+  border-radius: 999px;
+  padding: 4px 8px;
+}
 .plan-card > p {
   font-size: 10px;
   color: #a2afb2;
@@ -1740,6 +1754,79 @@ h1 > span {
 .field [data-slot="native-select-wrapper"] {
   width: 100%;
 }
+.plan-target-picker {
+  border: 1px solid #dde9e7;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fbfdfc;
+}
+.plan-target-header,
+.plan-target-row,
+.plan-target-total {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 13px;
+}
+.plan-target-header {
+  color: #879da1;
+  background: #f3f8f6;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.plan-target-row {
+  border-top: 1px solid #e8f0ee;
+}
+.plan-target-row.disabled {
+  opacity: 0.45;
+}
+.plan-target-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.plan-target-name > input {
+  accent-color: #168778;
+  width: 15px;
+  height: 15px;
+}
+.plan-target-name > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.plan-target-name b {
+  color: #294149;
+  font-size: 11px;
+  font-weight: 600;
+}
+.plan-target-name small {
+  color: #9aabad;
+  font-size: 8px;
+}
+.plan-target-row [data-slot="input"] {
+  height: 35px;
+  background: white;
+  font-size: 11px;
+}
+.plan-target-total {
+  border-top: 1px solid #dce9e5;
+  color: #78938b;
+  background: #f3f8f6;
+  font-size: 9px;
+}
+.plan-target-total strong {
+  color: #247565;
+  font-size: 10px;
+  text-align: right;
+}
+.plan-target-total.invalid strong {
+  color: #bb665d;
+}
 .form-tip {
   font-size: 10px;
   line-height: 1.8;
@@ -2176,6 +2263,13 @@ h1 > span {
   }
   .form-grid {
     gap: 17px 12px;
+  }
+  .plan-target-header,
+  .plan-target-row,
+  .plan-target-total {
+    grid-template-columns: minmax(0, 1fr) 112px;
+    gap: 9px;
+    padding-inline: 10px;
   }
   .app-dialog {
     padding: 25px !important;

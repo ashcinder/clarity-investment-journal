@@ -6,8 +6,10 @@ import {
   today,
   fxAt,
   validateLedger,
-  planAccountAmount,
+  planAccountAllocations,
+  planEntryKeys,
   money,
+  uid,
   positionStats,
   assetType,
 } from "../../shared/ledger.ts";
@@ -64,49 +66,67 @@ export function materializeAutomatic(
     const single = { ...state, plans: [plan] };
     for (const o of occurrences(single, from, end)) {
       if (o.done || o.skipped || !isDue(o, now)) continue;
-      if (state.entries.length >= 10000)
+      const entryKeys = planEntryKeys(plan, o.date);
+      const allocations = planAccountAllocations(state, plan, o.date)
+        .map((allocation, index) => ({
+          allocation,
+          entryKey: entryKeys[index],
+        }))
+        .filter(
+          ({ entryKey }) =>
+            !state.entries.some((entry) => entry.planKey === entryKey),
+        );
+      if (state.entries.length + allocations.length > 10000)
         throw Error("流水已达上限，请先备份并整理历史记录后再自动记账");
-      const holding = state.holdings?.find((h) => h.id === plan.holdingId);
-      const position = holding ? positionStats(state, holding, o.date) : null;
-      const amount = planAccountAmount(state, plan, o.date);
-      const estimatedQuantity =
-        holding &&
-        holding.trackingMode !== "amount" &&
-        assetType(state, holding) !== "grid" &&
-        position?.unitPrice &&
-        position.unitPrice > 0
-          ? amount / position.unitPrice
-          : undefined;
-      state.entries.push({
-        id: "auto-" + o.key,
-        accountId: plan.accountId,
-        ...(plan.holdingId ? { holdingId: plan.holdingId } : {}),
-        kind: "deposit",
-        amount,
-        ...(estimatedQuantity !== undefined
-          ? {
-              quantityDelta: estimatedQuantity,
-              unitPrice: position!.unitPrice!,
-            }
-          : {}),
-        date: o.date,
-        fx: fxAt(state, o.date).rate,
-        note:
-          "按计划自动记账：" +
-          plan.name +
-          " · " +
-          money(plan.amount, plan.currency ?? o.account.currency) +
-          "（北京时间；不代表实际成交）" +
-          (holding?.trackingMode === "amount"
-            ? "；已累计投入金额，可在资产中更新收益率"
-            : estimatedQuantity !== undefined
-              ? "；数量按最近手动价格估算"
-              : "；数量待实际成交后更新"),
-        createdAt: scheduledInstant(o.date, plan),
-        planKey: o.key,
-        automatic: true,
+      allocations.forEach(({ allocation, entryKey }) => {
+        const holding = state.holdings?.find(
+          (h) => h.id === allocation.holdingId,
+        );
+        const position = holding ? positionStats(state, holding, o.date) : null;
+        const estimatedQuantity =
+          holding &&
+          holding.trackingMode !== "amount" &&
+          assetType(state, holding) !== "grid" &&
+          position?.unitPrice &&
+          position.unitPrice > 0
+            ? allocation.amount / position.unitPrice
+            : undefined;
+        state.entries.push({
+          id: uid(),
+          accountId: plan.accountId,
+          ...(allocation.holdingId
+            ? { holdingId: allocation.holdingId }
+            : {}),
+          kind: "deposit",
+          amount: allocation.amount,
+          ...(estimatedQuantity !== undefined
+            ? {
+                quantityDelta: estimatedQuantity,
+                unitPrice: position!.unitPrice!,
+              }
+            : {}),
+          date: o.date,
+          fx: fxAt(state, o.date).rate,
+          note:
+            "按计划自动记账：" +
+            plan.name +
+            " · " +
+            money(
+              allocation.plannedAmount,
+              plan.currency ?? o.account.currency,
+            ) +
+            "（北京时间；不代表实际成交）" +
+            (holding?.trackingMode === "amount"
+              ? "；已累计投入金额，可在资产中更新收益率"
+              : estimatedQuantity !== undefined
+                ? "；数量按最近手动价格估算"
+                : "；数量待实际成交后更新"),
+          createdAt: scheduledInstant(o.date, plan),
+          planKey: entryKey,
+          automatic: true,
+        });
+        added++;
       });
-      added++;
     }
   }
   validateLedger(state);

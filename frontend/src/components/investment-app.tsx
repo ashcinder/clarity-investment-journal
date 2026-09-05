@@ -73,6 +73,10 @@ import {
   range,
   accountStats,
   planAccountAmount,
+  planAccountAllocations,
+  planCurrencyAllocations,
+  planEntryKeys,
+  planHoldingIds,
   holdingStats,
   assetType,
   updateHoldingCurrentValue,
@@ -1736,10 +1740,16 @@ export default function InvestmentApp() {
                             <h3>{p.name}</h3>
                             <small>
                               {a.name}
-                              {p.holdingId
+                              {planHoldingIds(p).length
                                 ? " · " +
-                                  s.holdings?.find((h) => h.id === p.holdingId)
-                                    ?.symbol
+                                  planHoldingIds(p)
+                                    .map(
+                                      (id) =>
+                                        s.holdings?.find((h) => h.id === id)
+                                          ?.symbol,
+                                    )
+                                    .filter(Boolean)
+                                    .join("、")
                                 : ""}{" "}
                               · {p.mode === "manual" ? "手动确认" : "自动记账"}
                             </small>
@@ -1757,6 +1767,25 @@ export default function InvestmentApp() {
                           {money(p.amount, p.currency ?? a.currency)}
                           <small>/ {frequency(p)}</small>
                         </strong>
+                        {p.allocations && (
+                          <div className="plan-allocation-summary">
+                            {planCurrencyAllocations(p).map((allocation) => (
+                              <span key={allocation.holdingId}>
+                                {
+                                  s.holdings?.find(
+                                    (h) => h.id === allocation.holdingId,
+                                  )?.symbol
+                                }{" "}
+                                {p.allocationMode === "ratios"
+                                  ? `${p.allocations?.find((item) => item.holdingId === allocation.holdingId)?.ratio}%`
+                                  : money(
+                                      allocation.amount,
+                                      p.currency ?? a.currency,
+                                    )}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         <p>
                           {p.time} · {tzLabel()} ·{" "}
                           {p.market === "CRYPTO"
@@ -2389,14 +2418,16 @@ export default function InvestmentApp() {
                 accountId={modal.accountId}
                 occurrence={modal.occurrence}
                 busy={busy}
-                onSubmit={(entry) =>
+                onSubmit={(result) =>
                   modalSubmit(() =>
                     change((s) => {
-                      if (modal.entry)
+                      const entries = Array.isArray(result) ? result : [result];
+                      if (modal.entry) {
+                        const entry = entries[0];
                         s.entries = s.entries.map((e) =>
                           e.id === entry.id ? entry : e,
                         );
-                      else s.entries.push(entry);
+                      } else s.entries.push(...entries);
                     }, "记录已保存，资产与收益已更新"),
                   )
                 }
@@ -2731,8 +2762,22 @@ function EntryForm({
   accountId?: string;
   occurrence?: Occurrence;
   busy: boolean;
-  onSubmit: (e: Entry) => Promise<void>;
+  onSubmit: (e: Entry | Entry[]) => Promise<void>;
 }) {
+  const occurrenceAllocations = occurrence
+    ? planAccountAllocations(state, occurrence.plan, occurrence.date)
+    : [];
+  const multiOccurrence = occurrenceAllocations.length > 1;
+  const [allocationAmounts, setAllocationAmounts] = useState<
+    Record<string, string>
+  >(() =>
+    Object.fromEntries(
+      occurrenceAllocations.map((allocation) => [
+        allocation.holdingId!,
+        String(allocation.amount),
+      ]),
+    ),
+  );
   const [aid, setAid] = useState(
     entry?.accountId ??
       accountId ??
@@ -2740,14 +2785,18 @@ function EntryForm({
       "",
   );
   const [holdingId, setHoldingId] = useState(
-    entry?.holdingId ?? occurrence?.plan.holdingId ?? "",
+    entry?.holdingId ??
+      occurrenceAllocations[0]?.holdingId ??
+      occurrence?.plan.holdingId ??
+      "",
   );
   const [kind, setKind] = useState<EntryKind>(entry?.kind ?? "deposit");
   const [amount, setAmount] = useState(
     String(
       entry?.amount ??
         (occurrence
-          ? planAccountAmount(state, occurrence.plan, occurrence.date)
+          ? occurrenceAllocations[0]?.amount ??
+            planAccountAmount(state, occurrence.plan, occurrence.date)
           : ""),
     ),
   );
@@ -2766,6 +2815,29 @@ function EntryForm({
       busy={busy}
       onSubmit={async () => {
         if (!account) throw Error("请先新增一个账户");
+        if (multiOccurrence) {
+          const keys = planEntryKeys(occurrence!.plan, occurrence!.date);
+          await onSubmit(
+            occurrenceAllocations.map((allocation, index) => ({
+              id: uid(),
+              accountId: aid,
+              holdingId: allocation.holdingId,
+              kind: "deposit",
+              amount: Number(allocationAmounts[allocation.holdingId!]),
+              date,
+              fx: Number(fx),
+              note:
+                note +
+                " · " +
+                (state.holdings?.find(
+                  (holding) => holding.id === allocation.holdingId,
+                )?.symbol ?? "资产"),
+              createdAt: new Date().toISOString(),
+              planKey: keys[index],
+            })),
+          );
+          return;
+        }
         await onSubmit({
           id: entry?.id ?? uid(),
           accountId: aid,
@@ -2793,7 +2865,11 @@ function EntryForm({
           note,
           createdAt: entry?.createdAt ?? new Date().toISOString(),
           ...(entry?.planKey || occurrence
-            ? { planKey: entry?.planKey ?? occurrence!.key }
+            ? {
+                planKey:
+                  entry?.planKey ??
+                  planEntryKeys(occurrence!.plan, occurrence!.date)[0],
+              }
             : {}),
         });
       }}
@@ -2817,14 +2893,51 @@ function EntryForm({
             ))}
         </NativeSelect>
       </Field>
-      <HoldingSelect
-        state={state}
-        accountId={aid}
-        value={holdingId}
-        onChange={setHoldingId}
-        disabled={locked}
-      />
-      <Field label="记录类型">
+      {multiOccurrence ? (
+        <div className="plan-target-picker field-wide">
+          <div className="plan-target-header">
+            <span>定投资产</span>
+            <span>实际金额（{account?.currency ?? "USD"}）</span>
+          </div>
+          {occurrenceAllocations.map((allocation) => (
+            <div className="plan-target-row" key={allocation.holdingId}>
+              <span className="plan-target-name">
+                <span>
+                  <b>
+                    {state.holdings?.find(
+                      (holding) => holding.id === allocation.holdingId,
+                    )?.symbol ?? "资产"}
+                  </b>
+                  <small>计划金额可在确认前调整</small>
+                </span>
+              </span>
+              <Input
+                type="number"
+                min="0.00000001"
+                max={1e12}
+                step="any"
+                value={allocationAmounts[allocation.holdingId!] ?? ""}
+                onChange={(e) =>
+                  setAllocationAmounts((current) => ({
+                    ...current,
+                    [allocation.holdingId!]: e.target.value,
+                  }))
+                }
+                required
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <HoldingSelect
+          state={state}
+          accountId={aid}
+          value={holdingId}
+          onChange={setHoldingId}
+          disabled={locked}
+        />
+      )}
+      {!multiOccurrence && <Field label="记录类型">
         <NativeSelect
           value={kind}
           disabled={locked}
@@ -2846,8 +2959,8 @@ function EntryForm({
             </option>
           ))}
         </NativeSelect>
-      </Field>
-      <Field label={`金额（${account?.currency ?? "USD"}）`}>
+      </Field>}
+      {!multiOccurrence && <Field label={`金额（${account?.currency ?? "USD"}）`}>
         <Input
           type="number"
           min={kind === "valuation" ? 0 : 0.00000001}
@@ -2858,7 +2971,7 @@ function EntryForm({
           placeholder="0.00"
           required
         />
-      </Field>
+      </Field>}
       <Field label="记账日期">
         <Input
           type="date"
@@ -3169,18 +3282,51 @@ function PlanForm({
   busy: boolean;
   onSubmit: (p: Plan) => Promise<void>;
 }) {
-  const [aid, setAid] = useState(
-    plan?.accountId ?? state.accounts.find((a) => !a.archived)?.id ?? "",
+  const initialAccountId =
+    plan?.accountId ?? state.accounts.find((a) => !a.archived)?.id ?? "";
+  const initialHoldingIds = plan ? planHoldingIds(plan) : [];
+  const initialAccountHoldings = (state.holdings ?? []).filter(
+    (h) => h.accountId === initialAccountId && !h.archived,
   );
-  const [holdingId, setHoldingId] = useState(plan?.holdingId ?? "");
+  const [aid, setAid] = useState(initialAccountId);
+  const [targetScope, setTargetScope] = useState<"assets" | "account">(
+    initialHoldingIds.length || (!plan && initialAccountHoldings.length)
+      ? "assets"
+      : "account",
+  );
+  const [allocationMode, setAllocationMode] = useState<"amounts" | "ratios">(
+    plan?.allocationMode ?? "amounts",
+  );
+  const [targets, setTargets] = useState<
+    Record<string, { selected: boolean; amount: string; ratio: string }>
+  >(() => {
+    const planned = plan ? planCurrencyAllocations(plan) : [];
+    return Object.fromEntries(
+      initialAccountHoldings.map((holding, index) => {
+        const allocation = plan?.allocations?.find(
+          (item) => item.holdingId === holding.id,
+        );
+        const fixed = planned.find((item) => item.holdingId === holding.id);
+        const selected = initialHoldingIds.length
+          ? initialHoldingIds.includes(holding.id)
+          : !plan && index === 0;
+        return [
+          holding.id,
+          {
+            selected,
+            amount: selected ? String(fixed?.amount ?? "") : "",
+            ratio: selected
+              ? String(allocation?.ratio ?? (initialHoldingIds.length <= 1 ? 100 : ""))
+              : "",
+          },
+        ];
+      }),
+    );
+  });
   const [mode, setMode] = useState<"auto" | "manual">(plan?.mode ?? "auto");
   const [planCurrency, setPlanCurrency] = useState<Currency>(
     plan?.currency ??
-      state.accounts.find(
-        (a) =>
-          a.id ===
-          (plan?.accountId ?? state.accounts.find((a) => !a.archived)?.id),
-      )?.currency ??
+      state.accounts.find((a) => a.id === initialAccountId)?.currency ??
       "USD",
   );
   const [name, setName] = useState(plan?.name ?? "");
@@ -3191,26 +3337,110 @@ function PlanForm({
   const [day, setDay] = useState(plan?.day ?? 1);
   const [time, setTime] = useState(plan?.time ?? "14:00");
   const [start, setStart] = useState(plan?.startDate ?? today());
-  const a = state.accounts.find((a) => a.id === aid);
-  const selectedType =
-    state.holdings?.find((h) => h.id === holdingId)?.assetType ?? a?.category;
-  const market: Market =
-    selectedType === "fund" ? "CN" : selectedType === "stock" ? "US" : "CRYPTO";
+  const a = state.accounts.find((account) => account.id === aid);
+  const accountHoldings = (state.holdings ?? []).filter(
+    (holding) =>
+      holding.accountId === aid &&
+      (!holding.archived || targets[holding.id]?.selected),
+  );
+  const selectedHoldings = accountHoldings.filter(
+    (holding) => targets[holding.id]?.selected,
+  );
+  const holdingMarket = (holding: Holding): Market => {
+    const type = holding.assetType ?? a?.category;
+    return type === "fund" ? "CN" : type === "stock" ? "US" : "CRYPTO";
+  };
+  const market: Market = selectedHoldings.length
+    ? holdingMarket(selectedHoldings[0])
+    : a?.category === "fund"
+      ? "CN"
+      : a?.category === "stock"
+        ? "US"
+        : "CRYPTO";
+  const fixedTotal = selectedHoldings.reduce(
+    (sum, holding) => sum + (Number(targets[holding.id]?.amount) || 0),
+    0,
+  );
+  const ratioTotal = selectedHoldings.reduce(
+    (sum, holding) => sum + (Number(targets[holding.id]?.ratio) || 0),
+    0,
+  );
+  const totalAmount =
+    targetScope === "assets" && allocationMode === "amounts"
+      ? fixedTotal
+      : Number(amount) || 0;
+  const resetTargets = (accountId: string) => {
+    const available = (state.holdings ?? []).filter(
+      (holding) => holding.accountId === accountId && !holding.archived,
+    );
+    setTargets(
+      Object.fromEntries(
+        available.map((holding, index) => [
+          holding.id,
+          {
+            selected: index === 0,
+            amount: "",
+            ratio: index === 0 ? "100" : "",
+          },
+        ]),
+      ),
+    );
+    setTargetScope(available.length ? "assets" : "account");
+  };
   return (
     <FormShell
       busy={busy}
       label="保存计划"
       onSubmit={async () => {
         if (!a) throw Error("请先新增账户");
+        if (targetScope === "assets" && !selectedHoldings.length)
+          throw Error("请至少选择一个定投资产");
+        if (
+          targetScope === "assets" &&
+          new Set(selectedHoldings.map(holdingMarket)).size > 1
+        )
+          throw Error("同一计划中的资产必须使用相同市场日历");
+        if (
+          targetScope === "assets" &&
+          allocationMode === "ratios" &&
+          Math.abs(ratioTotal - 100) >= 0.0001
+        )
+          throw Error("各资产占比合计必须为 100%");
+        if (
+          targetScope === "assets" &&
+          allocationMode === "amounts" &&
+          selectedHoldings.some(
+            (holding) => !(Number(targets[holding.id].amount) > 0),
+          )
+        )
+          throw Error("请为每项选中的资产填写大于 0 的定投金额");
+        if (
+          targetScope === "assets" &&
+          allocationMode === "ratios" &&
+          selectedHoldings.some(
+            (holding) => !(Number(targets[holding.id].ratio) > 0),
+          )
+        )
+          throw Error("请为每项选中的资产填写大于 0 的分配比例");
+        if (!(totalAmount > 0)) throw Error("每次定投总额必须大于 0");
+        const allocations =
+          targetScope === "assets"
+            ? selectedHoldings.map((holding) => ({
+                holdingId: holding.id,
+                ...(allocationMode === "amounts"
+                  ? { amount: Number(targets[holding.id].amount) }
+                  : { ratio: Number(targets[holding.id].ratio) }),
+              }))
+            : undefined;
         await onSubmit({
           id: plan?.id ?? uid(),
           accountId: aid,
-          ...(holdingId ? { holdingId } : {}),
+          ...(allocations ? { allocationMode, allocations } : {}),
           mode,
           currency: planCurrency,
           autoFrom: plan ? [start, today()].sort().at(-1)! : start,
           name: name.trim(),
-          amount: Number(amount),
+          amount: totalAmount,
           frequency: freq,
           day,
           time,
@@ -3225,7 +3455,7 @@ function PlanForm({
           maxLength={80}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="例如：每个月，给未来一点积累"
+          placeholder="例如：Crypto 核心组合定投"
           required
         />
       </Field>
@@ -3234,39 +3464,20 @@ function PlanForm({
           value={aid}
           onChange={(e) => {
             setAid(e.target.value);
-            setHoldingId("");
+            resetTargets(e.target.value);
           }}
           required
         >
           {state.accounts
-            .filter((a) => !a.archived || a.id === aid)
-            .map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name} · {a.currency}
+            .filter((account) => !account.archived || account.id === aid)
+            .map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name} · {account.currency}
               </option>
             ))}
         </NativeSelect>
       </Field>
-      <HoldingSelect
-        state={state}
-        accountId={aid}
-        value={holdingId}
-        onChange={setHoldingId}
-      />
-      <Field
-        label="记账方式"
-        wide
-        hint="自动模式到期直接记录预设金额；离线期间的记录下次打开时补齐。"
-      >
-        <NativeSelect
-          value={mode}
-          onChange={(e) => setMode(e.target.value as "auto" | "manual")}
-        >
-          <option value="auto">自动记账 · 无需逐笔操作</option>
-          <option value="manual">手动确认 · 按实际金额记账</option>
-        </NativeSelect>
-      </Field>
-      <Field label="定投币种">
+      <Field label="定投币种" wide>
         <NativeSelect
           value={planCurrency}
           onChange={(e) => setPlanCurrency(e.target.value as Currency)}
@@ -3275,17 +3486,164 @@ function PlanForm({
           <option value="CNY">CNY · 人民币</option>
         </NativeSelect>
       </Field>
-      <Field label={`每次投入（${planCurrency}）`}>
-        <Input
-          type="number"
-          min="0.01"
-          max={1e12}
-          step="any"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          required
-        />
+      <Field label="定投对象" wide>
+        <NativeSelect
+          value={targetScope}
+          onChange={(e) => setTargetScope(e.target.value as "assets" | "account")}
+        >
+          {accountHoldings.length > 0 && (
+            <option value="assets">选择一个或多个账户资产</option>
+          )}
+          <option value="account">账户未分配资金</option>
+        </NativeSelect>
       </Field>
+      {targetScope === "assets" && (
+        <>
+          <Field
+            label="金额设置方式"
+            wide
+            hint="可为每项资产填写固定金额，或填写一次总额后按比例分配。"
+          >
+            <NativeSelect
+              value={allocationMode}
+              onChange={(e) =>
+                setAllocationMode(e.target.value as "amounts" | "ratios")
+              }
+            >
+              <option value="amounts">分别设置每项金额</option>
+              <option value="ratios">设置总金额与资产比例</option>
+            </NativeSelect>
+          </Field>
+          {allocationMode === "ratios" && (
+            <Field label={`每次总投入（${planCurrency}）`} wide>
+              <Input
+                type="number"
+                min="0.01"
+                max={1e12}
+                step="any"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+              />
+            </Field>
+          )}
+          <div className="plan-target-picker field-wide">
+            <div className="plan-target-header">
+              <span>选择资产</span>
+              <span>
+                {allocationMode === "amounts"
+                  ? `每次金额（${planCurrency}）`
+                  : "分配比例（%）"}
+              </span>
+            </div>
+            {accountHoldings.map((holding) => {
+              const selected = !!targets[holding.id]?.selected;
+              const incompatible =
+                !selected &&
+                selectedHoldings.length > 0 &&
+                holdingMarket(holding) !== market;
+              return (
+                <label
+                  className={"plan-target-row" + (incompatible ? " disabled" : "")}
+                  key={holding.id}
+                >
+                  <span className="plan-target-name">
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      disabled={incompatible}
+                      onChange={(e) =>
+                        setTargets((current) => ({
+                          ...current,
+                          [holding.id]: {
+                            selected: e.target.checked,
+                            amount: current[holding.id]?.amount ?? "",
+                            ratio:
+                              current[holding.id]?.ratio ||
+                              (selectedHoldings.length ? "" : "100"),
+                          },
+                        }))
+                      }
+                    />
+                    <span>
+                      <b>{holding.symbol}</b>
+                      <small>{categories[holding.assetType ?? a?.category ?? "crypto"].label}</small>
+                    </span>
+                  </span>
+                  <Input
+                    type="number"
+                    min={allocationMode === "amounts" ? "0.01" : "0.0001"}
+                    max={allocationMode === "amounts" ? 1e12 : 100}
+                    step="any"
+                    disabled={!selected}
+                    value={
+                      allocationMode === "amounts"
+                        ? targets[holding.id]?.amount ?? ""
+                        : targets[holding.id]?.ratio ?? ""
+                    }
+                    onChange={(e) =>
+                      setTargets((current) => ({
+                        ...current,
+                        [holding.id]: {
+                          ...current[holding.id],
+                          selected: true,
+                          [allocationMode === "amounts" ? "amount" : "ratio"]:
+                            e.target.value,
+                        },
+                      }))
+                    }
+                    required={selected}
+                  />
+                </label>
+              );
+            })}
+            <div
+              className={
+                "plan-target-total" +
+                (allocationMode === "ratios" &&
+                Math.abs(ratioTotal - 100) >= 0.0001
+                  ? " invalid"
+                  : "")
+              }
+            >
+              <span>
+                已选择 {selectedHoldings.length} 项 · {market === "CRYPTO" ? "Crypto 日历" : market === "CN" ? "中国市场日历" : "美国市场日历"}
+              </span>
+              <strong>
+                {allocationMode === "amounts"
+                  ? `合计 ${money(fixedTotal, planCurrency)}`
+                  : `合计 ${Number(ratioTotal.toFixed(4))}%`}
+              </strong>
+            </div>
+          </div>
+        </>
+      )}
+      <Field
+        label="记账方式"
+        wide
+        hint="自动模式到期按分配明细分别入账；离线期间的记录下次打开时补齐。"
+      >
+        <NativeSelect
+          value={mode}
+          onChange={(e) => setMode(e.target.value as "auto" | "manual")}
+        >
+          <option value="auto">自动记账 · 无需逐笔操作</option>
+          <option value="manual">手动确认 · 可核对各项金额</option>
+        </NativeSelect>
+      </Field>
+      {targetScope === "account" && (
+        <Field label={`每次投入（${planCurrency}）`} wide>
+          <Input
+            type="number"
+            min="0.01"
+            max={1e12}
+            step="any"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            required
+          />
+        </Field>
+      )}
       <Field label="投入频率">
         <NativeSelect
           value={freq}
@@ -3304,10 +3662,7 @@ function PlanForm({
       </Field>
       {(freq === "weekly" || freq === "monthly") && (
         <Field label={freq === "monthly" ? "每月日期" : "每周日期"}>
-          <NativeSelect
-            value={day}
-            onChange={(e) => setDay(Number(e.target.value))}
-          >
+          <NativeSelect value={day} onChange={(e) => setDay(Number(e.target.value))}>
             {Array.from({ length: freq === "monthly" ? 31 : 7 }, (_, i) => (
               <option value={i + 1} key={i}>
                 {freq === "monthly"
@@ -3337,16 +3692,9 @@ function PlanForm({
       </Field>
       {a && planCurrency !== a.currency && (
         <div className="form-tip field-wide">
-          账户以 {a.currency} 记账，每笔{" "}
-          {money(Number(amount) || 0, planCurrency)}{" "}
-          将按当日账本汇率换算。目前约为{" "}
+          账户以 {a.currency} 记账，每次计划总额 {money(totalAmount, planCurrency)} 将按当日账本汇率换算。目前约为{" "}
           {money(
-            convert(
-              Number(amount) || 0,
-              planCurrency,
-              a.currency,
-              fxAt(state).rate,
-            ),
+            convert(totalAmount, planCurrency, a.currency, fxAt(state).rate),
             a.currency,
           )}
           。
@@ -3357,8 +3705,7 @@ function PlanForm({
         {market === "CRYPTO"
           ? "Crypto 每天均可交易，包含周末与节假日。"
           : `${market === "CN" ? "中国" : "美国"}市场自动排除周末与已核验节假日。日计划休市跳过，周/月计划顺延。`}{" "}
-        每月 29–31
-        日遇短月份按月末安排。新计划从开始日期自动补记；修改计划从今天起生效，历史流水保持不变。
+        每月 29–31 日遇短月份按月末安排。新计划从开始日期自动补记；修改计划从今天起生效，历史流水保持不变。
       </div>
     </FormShell>
   );
