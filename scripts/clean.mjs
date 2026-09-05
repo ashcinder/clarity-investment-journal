@@ -10,6 +10,7 @@ const generated = [
   "dist",
   "frontend/dist",
   "outputs",
+  "next-env.d.ts",
   "tsconfig.tsbuildinfo",
 ];
 await Promise.all(
