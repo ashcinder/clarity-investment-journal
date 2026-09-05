@@ -77,6 +77,8 @@ import {
   assetType,
   updateHoldingCurrentValue,
   principalFromCurrentValue,
+  principalFromCurrentProfit,
+  updateHoldingCurrentProfit,
   deleteHolding,
   unallocated,
   allocateHolding,
@@ -2471,16 +2473,30 @@ export default function InvestmentApp() {
                 accountId={modal.accountId}
                 holding={modal.holding}
                 busy={busy}
-                onSubmit={(holding, amount, source, roi, totalLossPrincipal) =>
+                onSubmit={(
+                  holding,
+                  amount,
+                  source,
+                  returnMode,
+                  returnValue,
+                  totalLossPrincipal,
+                ) =>
                   modalSubmit(() =>
                     change((next) => {
                       const previous = holdingStats(next, holding);
-                      const principal = principalFromCurrentValue(
-                        amount,
-                        roi,
-                        previous.withdrawn,
-                        totalLossPrincipal ?? previous.invested,
-                      );
+                      const principal =
+                        returnMode === "rate"
+                          ? principalFromCurrentValue(
+                              amount,
+                              returnValue,
+                              previous.withdrawn,
+                              totalLossPrincipal ?? previous.invested,
+                            )
+                          : principalFromCurrentProfit(
+                              amount,
+                              returnValue,
+                              previous.withdrawn,
+                            );
                       next.holdings ??= [];
                       if (modal.holding)
                         next.holdings = next.holdings.map((h) =>
@@ -2499,13 +2515,20 @@ export default function InvestmentApp() {
                           );
                       }
                       next.entries.push(
-                        updateHoldingCurrentValue(
-                          next,
-                          holding,
-                          amount,
-                          roi,
-                          totalLossPrincipal,
-                        ),
+                        returnMode === "rate"
+                          ? updateHoldingCurrentValue(
+                              next,
+                              holding,
+                              amount,
+                              returnValue,
+                              totalLossPrincipal,
+                            )
+                          : updateHoldingCurrentProfit(
+                              next,
+                              holding,
+                              amount,
+                              returnValue,
+                            ),
                       );
                     }, "资产已保存，投入、收益与估值已更新"),
                   )
@@ -3897,7 +3920,8 @@ function HoldingForm({
     h: Holding,
     amount: number,
     source: "existing" | "new",
-    roi: number,
+    returnMode: "rate" | "profit",
+    returnValue: number,
     totalLossPrincipal?: number,
   ) => Promise<void>;
   onRemove?: () => void;
@@ -3909,8 +3933,12 @@ function HoldingForm({
     holding?.assetType ?? account.category,
   );
   const [amount, setAmount] = useState(initial ? String(initial.value) : "");
+  const [returnMode, setReturnMode] = useState<"rate" | "profit">("rate");
   const [roi, setRoi] = useState(
     initial?.roi != null ? String(initial.roi) : "0",
+  );
+  const [profitAmount, setProfitAmount] = useState(
+    initial ? String(initial.profit) : "0",
   );
   const [source, setSource] = useState<"new" | "existing">("new");
   const [lossPrincipal, setLossPrincipal] = useState(
@@ -3920,16 +3948,21 @@ function HoldingForm({
   const value = Number(amount);
   let principal: number | null = null;
   try {
-    principal = principalFromCurrentValue(
-      value,
-      Number(roi),
-      withdrawn,
-      Number(lossPrincipal),
-    );
+    principal =
+      returnMode === "rate"
+        ? principalFromCurrentValue(
+            value,
+            Number(roi),
+            withdrawn,
+            Number(lossPrincipal),
+          )
+        : principalFromCurrentProfit(value, Number(profitAmount), withdrawn);
   } catch {
     /* Incomplete inputs are validated when the form is submitted. */
   }
   const profit = principal === null ? null : value + withdrawn - principal;
+  const calculatedRoi =
+    principal && profit !== null ? (profit / principal) * 100 : null;
   return (
     <FormShell
       busy={busy}
@@ -3956,8 +3989,11 @@ function HoldingForm({
           },
           value,
           source,
-          Number(roi),
-          Number(roi) === -100 ? Number(lossPrincipal) : undefined,
+          returnMode,
+          returnMode === "rate" ? Number(roi) : Number(profitAmount),
+          returnMode === "rate" && Number(roi) === -100
+            ? Number(lossPrincipal)
+            : undefined,
         )
       }
     >
@@ -4001,19 +4037,51 @@ function HoldingForm({
           required
         />
       </Field>
-      <Field label="收益率（%）" hint="累计收益率；亏损填负数，暂无收益填 0">
-        <Input
-          type="number"
-          min="-100"
-          max="100000"
-          step="any"
-          value={roi}
-          onChange={(e) => setRoi(e.target.value)}
-          placeholder="例如 8.5 或 -2.3"
-          required
-        />
+      <Field label="收益填写方式">
+        <NativeSelect
+          value={returnMode}
+          onChange={(e) => setReturnMode(e.target.value as "rate" | "profit")}
+        >
+          <option value="rate">填写收益率</option>
+          <option value="profit">填写收益额</option>
+        </NativeSelect>
       </Field>
-      {Number(roi) === -100 && (
+      {returnMode === "rate" ? (
+        <Field
+          label="收益率（%）"
+          hint="累计收益率；亏损填负数，暂无收益填 0"
+          wide
+        >
+          <Input
+            type="number"
+            min="-100"
+            max="100000"
+            step="any"
+            value={roi}
+            onChange={(e) => setRoi(e.target.value)}
+            placeholder="例如 8.5 或 -2.3"
+            required
+          />
+        </Field>
+      ) : (
+        <Field
+          label={`收益额（${account.currency}）`}
+          hint="累计盈利填正数，累计亏损填负数，暂无收益填 0"
+          wide
+        >
+          <Input
+            type="number"
+            min="-1000000000000"
+            max="1000000000000"
+            step="any"
+            value={profitAmount}
+            onChange={(e) => setProfitAmount(e.target.value)}
+            placeholder="例如 100 或 -216.74"
+            required
+          />
+        </Field>
+      )}
+      {returnMode === "rate" && Number(roi) === -100 && (
         <Field
           label={`原始投入金额（${account.currency}）`}
           hint="亏损 100% 且余额为 0 时无法反算本金，仅此情况需要填写。"
@@ -4053,11 +4121,13 @@ function HoldingForm({
           {profit === null ? "—" : money(profit, account.currency)}
         </small>
         <small>
-          {Number(roi) === -100
-            ? "按填写的原始本金记录全部亏损"
-            : withdrawn > 0
-              ? `本金 =（当前金额 + 已取出 ${money(withdrawn, account.currency)}）÷（1 + 收益率）`
-              : "本金 = 当前金额 ÷（1 + 收益率）"}
+          {returnMode === "profit"
+            ? `反算收益率 ${calculatedRoi === null ? "—" : pct(calculatedRoi)} · 本金 = 当前金额${withdrawn > 0 ? " + 已取出" : ""} − 收益额`
+            : Number(roi) === -100
+              ? "按填写的原始本金记录全部亏损"
+              : withdrawn > 0
+                ? `本金 =（当前金额 + 已取出 ${money(withdrawn, account.currency)}）÷（1 + 收益率）`
+                : "本金 = 当前金额 ÷（1 + 收益率）"}
         </small>
       </div>
       {holding && (

@@ -8,6 +8,8 @@ import {
   updateHoldingAmounts,
   updateHoldingCurrentValue,
   principalFromCurrentValue,
+  principalFromCurrentProfit,
+  updateHoldingCurrentProfit,
   allocateHolding,
   holdingStats,
   positionStats,
@@ -226,4 +228,27 @@ test("total loss uses known or explicitly supplied principal and rejects inconsi
   assert.equal(holdingStats(s, h).profit, -1000);
   assert.equal(holdingStats(s, h).roi, -100);
   validateLedger(s);
+});
+
+test("profit-amount entry derives principal and return rate from the current value", () => {
+  const s = fixture();
+  const h = { id: "profit-entry", accountId: "wallet", name: "Doge", symbol: "Doge", trackingMode: "amount", archived: false };
+  s.holdings.push(h);
+  const principal = principalFromCurrentProfit(112.1, -216.74);
+  assert.equal(principal, 328.84);
+  s.entries.push(...allocateHolding(s, h, principal, "new", date));
+  s.entries.push(updateHoldingCurrentProfit(s, h, 112.1, -216.74, date));
+  const stats = holdingStats(s, h);
+  assert.equal(stats.value, 112.1);
+  assert.equal(stats.invested, 328.84);
+  assert.equal(stats.profit, -216.74);
+  assert.ok(Math.abs(stats.roi - (-216.74 / 328.84) * 100) < 1e-8);
+  validateLedger(s);
+});
+
+test("profit-amount entry accounts for withdrawals and rejects impossible profit", () => {
+  assert.equal(principalFromCurrentProfit(800, 100, 200), 900);
+  assert.throws(() => principalFromCurrentProfit(100, 101), /不能大于/);
+  assert.throws(() => principalFromCurrentProfit(100, Number.NaN), /收益额/);
+  assert.throws(() => principalFromCurrentProfit(1e12, -1e12, 1), /超过上限/);
 });

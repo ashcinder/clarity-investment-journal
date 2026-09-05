@@ -1088,7 +1088,24 @@ export function principalFromCurrentValue(
   const principal = (value + withdrawn) / (1 + rate / 100);
   if (!Number.isFinite(principal) || principal > 1e12)
     throw Error("反算本金超过上限，请核对当前金额和收益率");
-  return principal;
+  return round(principal);
+}
+
+export function principalFromCurrentProfit(
+  value: number,
+  profit: number,
+  withdrawn = 0,
+): number {
+  if (!Number.isFinite(value) || value < 0 || value > 1e12)
+    throw Error("当前金额必须在 0 至 1 万亿之间");
+  if (!Number.isFinite(profit) || profit < -1e12 || profit > 1e12)
+    throw Error("收益额必须在负 1 万亿至 1 万亿之间");
+  const principal = value + withdrawn - profit;
+  if (principal < 0) throw Error("收益额不能大于当前金额与历史取出金额之和");
+  if (principal > 1e12) throw Error("反算本金超过上限，请核对当前金额和收益额");
+  if (principal > 0 && (profit / principal) * 100 > 100000)
+    throw Error("收益额对应的收益率超过 100000%，请核对输入");
+  return round(principal);
 }
 
 export function updateHoldingCurrentValue(
@@ -1115,6 +1132,29 @@ export function updateHoldingCurrentValue(
       "，收益率 " +
       rate +
       "%（本金按收益率反算）",
+  };
+}
+
+export function updateHoldingCurrentProfit(
+  state: Ledger,
+  holding: Holding,
+  value: number,
+  profit: number,
+  date = today(),
+): Entry {
+  const stats = holdingStats(state, holding, date);
+  const principal = principalFromCurrentProfit(value, profit, stats.withdrawn);
+  const rate = principal > 0 ? (profit / principal) * 100 : 0;
+  return {
+    ...updateHoldingAmounts(state, holding, principal, rate, date),
+    amount: round(value),
+    ...(principal > 0 ? { reportedRoi: rate } : { reportedRoi: undefined }),
+    note:
+      "编辑资产：当前金额 " +
+      value +
+      "，收益额 " +
+      profit +
+      "（本金按收益额反算）",
   };
 }
 
