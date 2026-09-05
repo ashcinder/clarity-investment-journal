@@ -1,5 +1,12 @@
 import http from "node:http";
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  randomUUID,
+  scryptSync,
+  timingSafeEqual,
+} from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
@@ -36,42 +43,93 @@ if (authValues.length > 0 && authValues.length < 3)
     "登录配置不完整，请同时设置 CLARITY_LOGIN_EMAIL、CLARITY_LOGIN_PASSWORD 和 CLARITY_SESSION_SECRET",
   );
 const authEnabled = authValues.length === 3;
+const registrationEnabled =
+  authEnabled && process.env.CLARITY_ALLOW_REGISTRATION !== "false";
 const sessionSeconds = 7 * 24 * 60 * 60;
 const loginFailures = new Map();
+const registrations = new Map();
 mkdirSync(dirname(dbPath), { recursive: true });
 const db = new DatabaseSync(dbPath);
 db.exec(
-  "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS ledgers (owner_id TEXT PRIMARY KEY,data TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,updated_at TEXT NOT NULL)",
+  `PRAGMA journal_mode=WAL;
+   CREATE TABLE IF NOT EXISTS ledgers (
+     owner_id TEXT PRIMARY KEY,
+     data TEXT NOT NULL,
+     revision INTEGER NOT NULL DEFAULT 0,
+     updated_at TEXT NOT NULL
+   );
+   CREATE TABLE IF NOT EXISTS users (
+     id TEXT PRIMARY KEY,
+     email TEXT NOT NULL COLLATE NOCASE UNIQUE,
+     password_hash TEXT NOT NULL,
+     created_at TEXT NOT NULL
+   );`,
 );
+const hashPassword = (password, salt = randomBytes(16).toString("hex")) =>
+  `${salt}:${scryptSync(password, salt, 64).toString("hex")}`;
+const verifyPassword = (password, stored) => {
+  const [salt, encoded, extra] = stored.split(":");
+  if (!salt || !encoded || extra || !/^[a-f\d]{128}$/i.test(encoded)) return false;
+  const expected = Buffer.from(encoded, "hex");
+  const supplied = scryptSync(password, salt, expected.length);
+  return timingSafeEqual(expected, supplied);
+};
+const normalizedEmail = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
+const validEmail = (email) =>
+  email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const validNewPassword = (password) =>
+  typeof password === "string" && password.length >= 8 && password.length <= 128;
+const now = () => new Date().toISOString();
+if (authEnabled) {
+  const email = normalizedEmail(loginEmail);
+  const existing = db.prepare("SELECT id FROM users WHERE email=?").get(email);
+  if (!existing) {
+    db.prepare(
+      "INSERT INTO users (id,email,password_hash,created_at) VALUES (?,?,?,?)",
+    ).run("local", email, hashPassword(loginPassword), now());
+  }
+}
 db.prepare("INSERT OR IGNORE INTO ledgers VALUES (?,?,0,?)").run(
   "local",
   JSON.stringify(emptyLedger()),
-  new Date().toISOString(),
+  now(),
 );
-const read = () => {
-  const r = db.prepare("SELECT * FROM ledgers WHERE owner_id=?").get("local");
+const ensureLedger = (ownerId) => {
+  db.prepare("INSERT OR IGNORE INTO ledgers VALUES (?,?,0,?)").run(
+    ownerId,
+    JSON.stringify(emptyLedger()),
+    now(),
+  );
+};
+const read = (ownerId) => {
+  ensureLedger(ownerId);
+  const r = db.prepare("SELECT * FROM ledgers WHERE owner_id=?").get(ownerId);
   return {
     state: JSON.parse(r.data),
     revision: r.revision,
     updatedAt: r.updated_at,
   };
 };
-const save = (state, revision) => {
-  const updatedAt = new Date().toISOString();
+const save = (ownerId, state, revision) => {
+  const updatedAt = now();
   const r = db
     .prepare(
       "UPDATE ledgers SET data=?,revision=revision+1,updated_at=? WHERE owner_id=? AND revision=?",
     )
-    .run(JSON.stringify(state), updatedAt, "local", revision);
+    .run(JSON.stringify(state), updatedAt, ownerId, revision);
   if (r.changes !== 1) return null;
   return { state, revision: revision + 1, updatedAt };
 };
-const synchronize = () => {
-  const old = read();
+const synchronize = (ownerId) => {
+  const old = read(ownerId);
   const result = materializeAutomatic(old.state);
   if (JSON.stringify(result.state) === JSON.stringify(old.state))
     return { ...old, autoAdded: 0 };
-  return { ...save(result.state, old.revision), autoAdded: result.added };
+  return {
+    ...save(ownerId, result.state, old.revision),
+    autoAdded: result.added,
+  };
 };
 const securityHeaders = {
   "X-Content-Type-Options": "nosniff",
@@ -91,28 +149,41 @@ const digest = (value) => createHash("sha256").update(value).digest();
 const sameText = (left, right) => timingSafeEqual(digest(left), digest(right));
 const signature = (payload) =>
   createHmac("sha256", sessionSecret).update(payload).digest("base64url");
-const createSession = () => {
+const createSession = (user) => {
   const payload = Buffer.from(
-    JSON.stringify({ email: loginEmail, expires: Date.now() + sessionSeconds * 1000 }),
+    JSON.stringify({
+      userId: user.id,
+      email: user.email,
+      expires: Date.now() + sessionSeconds * 1000,
+    }),
   ).toString("base64url");
   return payload + "." + signature(payload);
 };
-const hasSession = (req) => {
-  if (!authEnabled) return true;
+const sessionUser = (req) => {
+  if (!authEnabled) return { id: "local", email: null };
   const cookie = (req.headers.cookie || "")
     .split(";")
     .map((part) => part.trim())
     .find((part) => part.startsWith("clarity_session="));
-  if (!cookie) return false;
+  if (!cookie) return null;
   const token = cookie.slice("clarity_session=".length);
   const [payload, suppliedSignature, extra] = token.split(".");
-  if (!payload || !suppliedSignature || extra) return false;
-  if (!sameText(suppliedSignature, signature(payload))) return false;
+  if (!payload || !suppliedSignature || extra) return null;
+  if (!sameText(suppliedSignature, signature(payload))) return null;
   try {
     const session = JSON.parse(Buffer.from(payload, "base64url").toString());
-    return session.email === loginEmail && session.expires > Date.now();
+    if (
+      typeof session.userId !== "string" ||
+      typeof session.email !== "string" ||
+      session.expires <= Date.now()
+    )
+      return null;
+    const user = db
+      .prepare("SELECT id,email FROM users WHERE id=? AND email=?")
+      .get(session.userId, session.email);
+    return user || null;
   } catch {
-    return false;
+    return null;
   }
 };
 const sessionCookie = (token, maxAge = sessionSeconds) =>
@@ -193,10 +264,12 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (url.pathname === "/api/session" && req.method === "GET") {
+      const user = sessionUser(req);
       json(res, 200, {
-        authenticated: hasSession(req),
+        authenticated: Boolean(user),
         authEnabled,
-        email: authEnabled ? loginEmail : null,
+        registrationEnabled,
+        email: user?.email ?? null,
       });
       return;
     }
@@ -206,17 +279,27 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const client = req.socket.remoteAddress || "unknown";
-      const failed = loginFailures.get(client);
+      let failed = loginFailures.get(client);
+      if (failed?.blockedUntil && failed.blockedUntil <= Date.now()) {
+        loginFailures.delete(client);
+        failed = null;
+      }
       if (failed?.blockedUntil > Date.now()) {
         json(res, 429, { error: "尝试次数过多，请稍后再试" });
         return;
       }
       const body = await bodyOf(req);
+      const email = normalizedEmail(body.email);
+      const user = validEmail(email)
+        ? db
+            .prepare("SELECT id,email,password_hash FROM users WHERE email=?")
+            .get(email)
+        : null;
       const valid =
-        typeof body.email === "string" &&
+        user &&
         typeof body.password === "string" &&
-        sameText(body.email.trim().toLowerCase(), loginEmail.toLowerCase()) &&
-        sameText(body.password, loginPassword);
+        body.password.length <= 128 &&
+        verifyPassword(body.password, user.password_hash);
       if (!valid) {
         const attempts = (failed?.attempts || 0) + 1;
         loginFailures.set(client, {
@@ -230,8 +313,55 @@ const server = http.createServer(async (req, res) => {
       json(
         res,
         200,
-        { authenticated: true, email: loginEmail },
-        { "Set-Cookie": sessionCookie(createSession()) },
+        { authenticated: true, email: user.email },
+        { "Set-Cookie": sessionCookie(createSession(user)) },
+      );
+      return;
+    }
+    if (url.pathname === "/api/register" && req.method === "POST") {
+      if (!registrationEnabled) {
+        json(res, 403, { error: "此环境未开放注册" });
+        return;
+      }
+      const client = req.socket.remoteAddress || "unknown";
+      const recentRegistrations = (registrations.get(client) || []).filter(
+        (time) => time > Date.now() - 60 * 60 * 1000,
+      );
+      if (recentRegistrations.length >= 5) {
+        json(res, 429, { error: "注册次数过多，请稍后再试" });
+        return;
+      }
+      const body = await bodyOf(req);
+      const email = normalizedEmail(body.email);
+      if (!validEmail(email)) throw Error("请输入有效的邮箱地址");
+      if (!validNewPassword(body.password))
+        throw Error("密码需要 8–128 个字符");
+      if (db.prepare("SELECT 1 FROM users WHERE email=?").get(email)) {
+        json(res, 409, { error: "该邮箱已经注册，请直接登录" });
+        return;
+      }
+      const user = { id: randomUUID(), email };
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare(
+          "INSERT INTO users (id,email,password_hash,created_at) VALUES (?,?,?,?)",
+        ).run(user.id, user.email, hashPassword(body.password), now());
+        ensureLedger(user.id);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        if (String(error.message).includes("UNIQUE")) {
+          json(res, 409, { error: "该邮箱已经注册，请直接登录" });
+          return;
+        }
+        throw error;
+      }
+      registrations.set(client, [...recentRegistrations, Date.now()]);
+      json(
+        res,
+        201,
+        { authenticated: true, email: user.email },
+        { "Set-Cookie": sessionCookie(createSession(user)) },
       );
       return;
     }
@@ -244,14 +374,16 @@ const server = http.createServer(async (req, res) => {
       );
       return;
     }
-    if (url.pathname.startsWith("/api/") && !hasSession(req)) {
+    const user = url.pathname.startsWith("/api/") ? sessionUser(req) : null;
+    if (url.pathname.startsWith("/api/") && !user) {
       json(res, 401, { error: "请先登录投资手账" });
       return;
     }
     if (url.pathname === "/api/ledger" && req.method === "GET") {
       json(res, 200, {
-        ...synchronize(),
+        ...synchronize(user.id),
         authMode: authEnabled ? "password" : "none",
+        user: authEnabled ? { email: user.email } : null,
       });
       return;
     }
@@ -259,7 +391,7 @@ const server = http.createServer(async (req, res) => {
       const body = await bodyOf(req);
       if (!Number.isSafeInteger(body.revision)) throw Error("版本无效");
       const result = materializeAutomatic(validateLedger(body.state));
-      const saved = save(result.state, body.revision);
+      const saved = save(user.id, result.state, body.revision);
       json(
         res,
         saved ? 200 : 409,
@@ -268,6 +400,7 @@ const server = http.createServer(async (req, res) => {
               ...saved,
               autoAdded: result.added,
               authMode: authEnabled ? "password" : "none",
+              user: authEnabled ? { email: user.email } : null,
             }
           : { error: "账本已更新，请刷新后保存" },
       );
@@ -281,7 +414,7 @@ const server = http.createServer(async (req, res) => {
         !Number.isSafeInteger(body.revision)
       )
         throw Error("请输入“清空”并选择范围");
-      const old = read();
+      const old = read(user.id);
       if (body.revision !== old.revision) {
         json(res, 409, { error: "账本已更新，请刷新后清空" });
         return;
@@ -290,8 +423,13 @@ const server = http.createServer(async (req, res) => {
         res,
         200,
         {
-          ...save(clearLedger(old.state, body.keepAccounts), body.revision),
+          ...save(
+            user.id,
+            clearLedger(old.state, body.keepAccounts),
+            body.revision,
+          ),
           authMode: authEnabled ? "password" : "none",
+          user: authEnabled ? { email: user.email } : null,
         },
       );
       return;
@@ -358,7 +496,10 @@ const server = http.createServer(async (req, res) => {
 });
 const timer = setInterval(() => {
   try {
-    synchronize();
+    for (const { owner_id: ownerId } of db
+      .prepare("SELECT owner_id FROM ledgers")
+      .all())
+      synchronize(ownerId);
   } catch (error) {
     console.error("自动记账未完成：", error.message);
   }

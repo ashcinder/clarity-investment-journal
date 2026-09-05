@@ -43,8 +43,16 @@ test("password login protects the server ledger and serves the built frontend", 
     assert.deepEqual(await (await request("/api/session")).json(), {
       authenticated: false,
       authEnabled: true,
-      email: "owner@example.com",
+      registrationEnabled: true,
+      email: null,
     });
+
+    const weakRegistration = await request("/api/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "new@example.com", password: "short" }),
+    });
+    assert.equal(weakRegistration.status, 400);
 
     const wrong = await request("/api/login", {
       method: "POST",
@@ -68,7 +76,54 @@ test("password login protects the server ledger and serves the built frontend", 
     assert.match(cookie, /SameSite=Strict/);
     const ledger = await request("/api/ledger", { headers: { Cookie: cookie } });
     assert.equal(ledger.status, 200);
-    assert.equal((await ledger.json()).authMode, "password");
+    const ownerLedger = await ledger.json();
+    assert.equal(ownerLedger.authMode, "password");
+    assert.equal(ownerLedger.user.email, "owner@example.com");
+
+    const registration = await request("/api/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "new@example.com",
+        password: "a secure password",
+      }),
+    });
+    assert.equal(registration.status, 201);
+    const newCookie = registration.headers.get("set-cookie");
+    assert.match(newCookie, /clarity_session=/);
+    const newLedgerResponse = await request("/api/ledger", {
+      headers: { Cookie: newCookie },
+    });
+    const newLedger = await newLedgerResponse.json();
+    assert.equal(newLedger.state.accounts.length, 0);
+    assert.equal(newLedger.user.email, "new@example.com");
+    newLedger.state.settings.cnyPerUsd = 6.25;
+    const saveNew = await request("/api/ledger", {
+      method: "PUT",
+      headers: {
+        Cookie: newCookie,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(newLedger),
+    });
+    assert.equal(saveNew.status, 200);
+    const ownerAgain = await request("/api/ledger", {
+      headers: { Cookie: cookie },
+    });
+    assert.notEqual(
+      (await ownerAgain.json()).state.settings.cnyPerUsd,
+      6.25,
+    );
+
+    const duplicate = await request("/api/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "NEW@example.com",
+        password: "another secure password",
+      }),
+    });
+    assert.equal(duplicate.status, 409);
 
     const logout = await request("/api/logout", {
       method: "POST",

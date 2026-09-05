@@ -36,6 +36,7 @@ import {
   Play,
   ShieldCheck,
   LogIn,
+  UserPlus,
   LogOut,
   Mail,
   LockKeyhole,
@@ -166,6 +167,7 @@ type ServerData = {
   updatedAt: string;
   autoAdded?: number;
   authMode?: "password" | "none";
+  user?: { email: string } | null;
 };
 const tzLabel = () => "北京时间";
 const frequency = (p: Plan) =>
@@ -271,15 +273,30 @@ class LedgerConflictError extends Error {}
 function LoginScreen({
   busy,
   error,
-  onLogin,
+  registrationEnabled,
+  onAuthenticate,
 }: {
   busy: boolean;
   error: string;
-  onLogin: (email: string, password: string) => Promise<void>;
+  registrationEnabled: boolean;
+  onAuthenticate: (
+    mode: "login" | "register",
+    email: string,
+    password: string,
+  ) => Promise<void>;
 }) {
-  const [email, setEmail] = useState("tangyucinder@gmail.com");
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
   const [formError, setFormError] = useState("");
+  const register = mode === "register";
+  const switchMode = (next: "login" | "register") => {
+    setMode(next);
+    setPassword("");
+    setConfirmation("");
+    setFormError("");
+  };
   return (
     <main className="login-page">
       <section className="login-story" aria-hidden="true">
@@ -307,18 +324,26 @@ function LoginScreen({
           onSubmit={(event) => {
             event.preventDefault();
             setFormError("");
-            void onLogin(email, password).catch((cause) =>
+            if (register && password !== confirmation) {
+              setFormError("两次输入的密码不一致");
+              return;
+            }
+            void onAuthenticate(mode, email, password).catch((cause) =>
               setFormError(errorText(cause)),
             );
           }}
         >
           <span className="login-mark">
-            <LogIn size={23} />
+            {register ? <UserPlus size={23} /> : <LogIn size={23} />}
           </span>
           <div>
-            <p className="eyebrow">私人投资空间</p>
-            <h2>欢迎回来</h2>
-            <p>登录后继续记录你的资产与长期计划。</p>
+            <p className="eyebrow">每位用户 · 独立账本</p>
+            <h2>{register ? "创建你的账本" : "欢迎回来"}</h2>
+            <p>
+              {register
+                ? "使用邮箱注册，开始记录属于你的资产与长期计划。"
+                : "登录后继续记录你的资产与长期计划。"}
+            </p>
           </div>
           <label htmlFor="login-email">
             <span>登录邮箱</span>
@@ -327,7 +352,8 @@ function LoginScreen({
               <Input
                 id="login-email"
                 type="email"
-                autoComplete="username"
+                autoComplete="email"
+                placeholder="name@example.com"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 required
@@ -341,21 +367,61 @@ function LoginScreen({
               <Input
                 id="login-password"
                 type="password"
-                autoComplete="current-password"
+                autoComplete={register ? "new-password" : "current-password"}
+                minLength={register ? 8 : undefined}
+                maxLength={128}
+                placeholder={register ? "至少 8 个字符" : "输入密码"}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 required
               />
             </span>
           </label>
+          {register && (
+            <label htmlFor="register-password-confirmation">
+              <span>确认密码</span>
+              <span className="login-input">
+                <ShieldCheck size={17} />
+                <Input
+                  id="register-password-confirmation"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={8}
+                  maxLength={128}
+                  value={confirmation}
+                  onChange={(event) => setConfirmation(event.target.value)}
+                  placeholder="再次输入密码"
+                  required
+                />
+              </span>
+            </label>
+          )}
           {(formError || error) && (
             <p className="login-error">{formError || error}</p>
           )}
           <Button type="submit" className="primary-button" disabled={busy}>
-            {busy ? "正在验证…" : "进入我的账本"}
+            {busy
+              ? register
+                ? "正在创建…"
+                : "正在验证…"
+              : register
+                ? "注册并进入账本"
+                : "进入我的账本"}
           </Button>
+          {registrationEnabled && (
+            <div className="auth-switch">
+              <span>{register ? "已经有账号？" : "第一次使用澄明？"}</span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => switchMode(register ? "login" : "register")}
+              >
+                {register ? "返回登录" : "免费注册"}
+              </button>
+            </div>
+          )}
           <small className="login-security">
-            <ShieldCheck size={13} /> 登录状态由服务器加密验证
+            <ShieldCheck size={13} /> 密码加密保存，每个账号的数据相互隔离
           </small>
         </form>
       </section>
@@ -372,6 +438,7 @@ export default function InvestmentApp() {
   const [loadError, setLoadError] = useState("");
   const [authRequired, setAuthRequired] = useState(false);
   const [passwordAuth, setPasswordAuth] = useState(false);
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [modal, setModal] = useState<Modal | null>(null);
   const [busy, setBusy] = useState(false);
@@ -479,10 +546,12 @@ export default function InvestmentApp() {
         if (sessionResponse.ok) {
           const session = (await sessionResponse.json()) as {
             authEnabled: boolean;
+            registrationEnabled?: boolean;
           };
           if (session.authEnabled) {
             setAuthRequired(true);
             setPasswordAuth(true);
+            setRegistrationEnabled(Boolean(session.registrationEnabled));
             setLoadError("");
             return;
           }
@@ -751,16 +820,26 @@ export default function InvestmentApp() {
       throw e;
     }
   };
-  async function login(email: string, password: string) {
+  async function authenticate(
+    mode: "login" | "register",
+    email: string,
+    password: string,
+  ) {
     setBusy(true);
     try {
-      const response = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
+      const response = await fetch(
+        mode === "register" ? "/api/register" : "/api/login",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        },
+      );
       const result = (await response.json()) as { error?: string };
-      if (!response.ok) throw Error(result.error || "登录失败");
+      if (!response.ok)
+        throw Error(
+          result.error || (mode === "register" ? "注册失败" : "登录失败"),
+        );
       setAuthRequired(false);
       setLoadError("");
       await load();
@@ -782,7 +861,14 @@ export default function InvestmentApp() {
     }
   }
   if (authRequired)
-    return <LoginScreen busy={busy} error={loadError} onLogin={login} />;
+    return (
+      <LoginScreen
+        busy={busy}
+        error={loadError}
+        registrationEnabled={registrationEnabled}
+        onAuthenticate={authenticate}
+      />
+    );
   return (
     <div className="app-shell">
       <aside className={"sidebar" + (mobile ? " mobile-open" : "")}>
@@ -820,9 +906,9 @@ export default function InvestmentApp() {
         <div className="profile">
           <span className="avatar">我</span>
           <div>
-            我的个人账本
+            {data?.user?.email || "我的个人账本"}
             <small>
-              <ShieldCheck size={10} /> 独立私有空间
+              <ShieldCheck size={10} /> 独立加密空间
             </small>
           </div>
           {passwordAuth && (

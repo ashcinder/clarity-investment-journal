@@ -20,7 +20,8 @@ API 默认地址：http://127.0.0.1:4318 ，健康检查：`GET /api/health`。
 - `CLARITY_FRONTEND_ORIGIN`：允许的前端来源，默认 `http://127.0.0.1:5173`。
 - `CLARITY_FRONTEND_DIR`：需要由后端托管的前端构建目录。
 - `CLARITY_PUBLIC_ORIGIN`：云服务器对外 HTTPS 来源。
-- `CLARITY_LOGIN_EMAIL`、`CLARITY_LOGIN_PASSWORD`、`CLARITY_SESSION_SECRET`：三项同时存在时启用密码登录。
+- `CLARITY_LOGIN_EMAIL`、`CLARITY_LOGIN_PASSWORD`、`CLARITY_SESSION_SECRET`：三项同时存在时启用登录，并在首次启动时创建保留旧账本的初始管理员账号。
+- `CLARITY_ALLOW_REGISTRATION`：默认开放邮箱注册；设为 `false` 可关闭新用户注册。
 
 服务只监听本机地址，供个人本地使用。API 包括账本读写、清空、汇率查询和健康检查；后台每分钟检查自动定投。
 

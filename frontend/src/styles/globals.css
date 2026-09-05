@@ -179,6 +179,12 @@ svg {
   padding: 22px 10px 0;
   font-size: 12px;
 }
+.profile > div {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .avatar {
   background: #3f5c65;
   border: 1px solid #59737a;
@@ -3107,6 +3113,32 @@ h1 > span {
 .login-card .primary-button {
   height: 48px;
   margin-top: 2px;
+}
+.auth-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: #87999d;
+  font-size: 11px;
+}
+.auth-switch button {
+  border: 0;
+  padding: 2px 0;
+  color: #167a69;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.auth-switch button:hover {
+  color: #0d5d50;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.auth-switch button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 .login-error {
   padding: 11px 13px;
