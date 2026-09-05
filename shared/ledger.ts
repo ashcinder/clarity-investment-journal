@@ -1108,6 +1108,25 @@ export function principalFromCurrentProfit(
   return round(principal);
 }
 
+export function profitFromCurrentPrincipal(
+  value: number,
+  principal: number,
+  withdrawn = 0,
+): number {
+  if (!Number.isFinite(value) || value < 0 || value > 1e12)
+    throw Error("当前金额必须在 0 至 1 万亿之间");
+  if (!Number.isFinite(principal) || principal < 0 || principal > 1e12)
+    throw Error("总投入金额必须在 0 至 1 万亿之间");
+  if (!Number.isFinite(withdrawn) || withdrawn < 0)
+    throw Error("历史取出金额无效");
+  const profit = value + withdrawn - principal;
+  if (profit < -1e12 || profit > 1e12)
+    throw Error("计算出的收益额超过上限，请核对当前金额和总投入金额");
+  if (principal > 0 && (profit / principal) * 100 > 100000)
+    throw Error("总投入金额对应的收益率超过 100000%，请核对输入");
+  return round(profit);
+}
+
 export function updateHoldingCurrentValue(
   state: Ledger,
   holding: Holding,

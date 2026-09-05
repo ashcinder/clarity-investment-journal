@@ -9,6 +9,7 @@ import {
   updateHoldingCurrentValue,
   principalFromCurrentValue,
   principalFromCurrentProfit,
+  profitFromCurrentPrincipal,
   updateHoldingCurrentProfit,
   allocateHolding,
   holdingStats,
@@ -251,4 +252,24 @@ test("profit-amount entry accounts for withdrawals and rejects impossible profit
   assert.throws(() => principalFromCurrentProfit(100, 101), /不能大于/);
   assert.throws(() => principalFromCurrentProfit(100, Number.NaN), /收益额/);
   assert.throws(() => principalFromCurrentProfit(1e12, -1e12, 1), /超过上限/);
+});
+
+test("current amount and total invested derive profit and return rate", () => {
+  const profit = profitFromCurrentPrincipal(112.1, 328.84);
+  assert.equal(profit, -216.74);
+  assert.equal(profitFromCurrentPrincipal(800, 900, 200), 100);
+  assert.throws(() => profitFromCurrentPrincipal(100, -1), /总投入金额/);
+  assert.throws(() => profitFromCurrentPrincipal(100, Number.NaN), /总投入金额/);
+
+  const s = fixture();
+  const h = { id: "principal-entry", accountId: "wallet", name: "BTC", symbol: "BTC", trackingMode: "amount", archived: false };
+  s.holdings.push(h);
+  s.entries.push(...allocateHolding(s, h, 328.84, "new", date));
+  s.entries.push(updateHoldingCurrentProfit(s, h, 112.1, profit, date));
+  const stats = holdingStats(s, h);
+  assert.equal(stats.value, 112.1);
+  assert.equal(stats.invested, 328.84);
+  assert.equal(stats.profit, -216.74);
+  assert.ok(Math.abs(stats.roi - (-216.74 / 328.84) * 100) < 1e-8);
+  validateLedger(s);
 });

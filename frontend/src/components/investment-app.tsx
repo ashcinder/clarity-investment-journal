@@ -78,6 +78,7 @@ import {
   updateHoldingCurrentValue,
   principalFromCurrentValue,
   principalFromCurrentProfit,
+  profitFromCurrentPrincipal,
   updateHoldingCurrentProfit,
   deleteHolding,
   unallocated,
@@ -253,6 +254,7 @@ function DownloadFile(name: string, data: string, type: string) {
 }
 const errorText = (e: unknown) =>
   e instanceof Error ? e.message : "操作失败，请重试";
+class LedgerConflictError extends Error {}
 export default function InvestmentApp() {
   const [data, setData] = useState<ServerData | null>(null);
   const [minute, setMinute] = useState(() => Date.now());
@@ -304,7 +306,10 @@ export default function InvestmentApp() {
         body: JSON.stringify({ state, revision: dataRef.current.revision }),
       });
       const body = (await response.json()) as ServerData & { error: string };
-      if (!response.ok) throw Error(body.error);
+      if (!response.ok)
+        throw response.status === 409
+          ? new LedgerConflictError(body.error)
+          : Error(body.error);
       dataRef.current = body;
       setData(body);
       setNotice(message);
@@ -314,10 +319,25 @@ export default function InvestmentApp() {
     }
   }
   async function change(edit: (state: Ledger) => void, message?: string) {
-    if (!dataRef.current) return;
-    const next = structuredClone(dataRef.current.state);
-    edit(next);
-    await save(next, message);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (!dataRef.current) return;
+      const next = structuredClone(dataRef.current.state);
+      edit(next);
+      try {
+        await save(next, message);
+        return;
+      } catch (error) {
+        if (!(error instanceof LedgerConflictError) || attempt === 2)
+          throw error;
+        const response = await fetch("/api/ledger");
+        const latest = (await response.json()) as ServerData & {
+          error: string;
+        };
+        if (!response.ok) throw Error(latest.error);
+        dataRef.current = latest;
+        setData(latest);
+      }
+    }
   }
   async function syncFx(quiet = false) {
     try {
@@ -2484,6 +2504,14 @@ export default function InvestmentApp() {
                   modalSubmit(() =>
                     change((next) => {
                       const previous = holdingStats(next, holding);
+                      const enteredProfit =
+                        returnMode === "principal"
+                          ? profitFromCurrentPrincipal(
+                              amount,
+                              returnValue,
+                              previous.withdrawn,
+                            )
+                          : returnValue;
                       const principal =
                         returnMode === "rate"
                           ? principalFromCurrentValue(
@@ -2494,7 +2522,7 @@ export default function InvestmentApp() {
                             )
                           : principalFromCurrentProfit(
                               amount,
-                              returnValue,
+                              enteredProfit,
                               previous.withdrawn,
                             );
                       next.holdings ??= [];
@@ -2527,7 +2555,7 @@ export default function InvestmentApp() {
                               next,
                               holding,
                               amount,
-                              returnValue,
+                              enteredProfit,
                             ),
                       );
                     }, "资产已保存，投入、收益与估值已更新"),
@@ -3920,7 +3948,7 @@ function HoldingForm({
     h: Holding,
     amount: number,
     source: "existing" | "new",
-    returnMode: "rate" | "profit",
+    returnMode: "principal" | "profit" | "rate",
     returnValue: number,
     totalLossPrincipal?: number,
   ) => Promise<void>;
@@ -3933,9 +3961,14 @@ function HoldingForm({
     holding?.assetType ?? account.category,
   );
   const [amount, setAmount] = useState(initial ? String(initial.value) : "");
-  const [returnMode, setReturnMode] = useState<"rate" | "profit">("rate");
+  const [returnMode, setReturnMode] = useState<
+    "principal" | "profit" | "rate"
+  >("principal");
+  const [principalAmount, setPrincipalAmount] = useState(
+    initial ? String(initial.invested) : "",
+  );
   const [roi, setRoi] = useState(
-    initial?.roi != null ? String(initial.roi) : "0",
+    initial?.roi != null ? String(Number(initial.roi.toFixed(4))) : "0",
   );
   const [profitAmount, setProfitAmount] = useState(
     initial ? String(initial.profit) : "0",
@@ -3956,7 +3989,17 @@ function HoldingForm({
             withdrawn,
             Number(lossPrincipal),
           )
-        : principalFromCurrentProfit(value, Number(profitAmount), withdrawn);
+        : returnMode === "profit"
+          ? principalFromCurrentProfit(value, Number(profitAmount), withdrawn)
+          : principalFromCurrentProfit(
+              value,
+              profitFromCurrentPrincipal(
+                value,
+                Number(principalAmount),
+                withdrawn,
+              ),
+              withdrawn,
+            );
   } catch {
     /* Incomplete inputs are validated when the form is submitted. */
   }
@@ -3990,7 +4033,11 @@ function HoldingForm({
           value,
           source,
           returnMode,
-          returnMode === "rate" ? Number(roi) : Number(profitAmount),
+          returnMode === "rate"
+            ? Number(roi)
+            : returnMode === "profit"
+              ? Number(profitAmount)
+              : Number(principalAmount),
           returnMode === "rate" && Number(roi) === -100
             ? Number(lossPrincipal)
             : undefined,
@@ -4037,16 +4084,38 @@ function HoldingForm({
           required
         />
       </Field>
-      <Field label="收益填写方式">
+      <Field label="计算依据">
         <NativeSelect
           value={returnMode}
-          onChange={(e) => setReturnMode(e.target.value as "rate" | "profit")}
+          onChange={(e) =>
+            setReturnMode(
+              e.target.value as "principal" | "profit" | "rate",
+            )
+          }
         >
-          <option value="rate">填写收益率</option>
+          <option value="principal">填写总投入金额</option>
           <option value="profit">填写收益额</option>
+          <option value="rate">填写收益率</option>
         </NativeSelect>
       </Field>
-      {returnMode === "rate" ? (
+      {returnMode === "principal" ? (
+        <Field
+          label={`总投入金额（${account.currency}）`}
+          hint="填写该资产累计投入的本金，系统会计算收益额与收益率"
+          wide
+        >
+          <Input
+            type="number"
+            min="0"
+            max="1000000000000"
+            step="any"
+            value={principalAmount}
+            onChange={(e) => setPrincipalAmount(e.target.value)}
+            placeholder="例如 1000"
+            required
+          />
+        </Field>
+      ) : returnMode === "rate" ? (
         <Field
           label="收益率（%）"
           hint="累计收益率；亏损填负数，暂无收益填 0"
@@ -4056,7 +4125,7 @@ function HoldingForm({
             type="number"
             min="-100"
             max="100000"
-            step="any"
+            step="0.0001"
             value={roi}
             onChange={(e) => setRoi(e.target.value)}
             placeholder="例如 8.5 或 -2.3"
@@ -4121,9 +4190,11 @@ function HoldingForm({
           {profit === null ? "—" : money(profit, account.currency)}
         </small>
         <small>
-          {returnMode === "profit"
-            ? `反算收益率 ${calculatedRoi === null ? "—" : pct(calculatedRoi)} · 本金 = 当前金额${withdrawn > 0 ? " + 已取出" : ""} − 收益额`
-            : Number(roi) === -100
+          {returnMode === "principal"
+            ? `收益额 = 当前金额${withdrawn > 0 ? " + 已取出" : ""} − 总投入 · 收益率 ${calculatedRoi === null ? "—" : pct(calculatedRoi)}`
+            : returnMode === "profit"
+              ? `反算收益率 ${calculatedRoi === null ? "—" : pct(calculatedRoi)} · 本金 = 当前金额${withdrawn > 0 ? " + 已取出" : ""} − 收益额`
+              : Number(roi) === -100
               ? "按填写的原始本金记录全部亏损"
               : withdrawn > 0
                 ? `本金 =（当前金额 + 已取出 ${money(withdrawn, account.currency)}）÷（1 + 收益率）`
@@ -4132,7 +4203,7 @@ function HoldingForm({
       </div>
       {holding && (
         <div className="form-tip field-wide">
-          保存会记录今天的估值，并按当前金额和收益率校正本金。定投仍会自动累计。
+          保存会记录今天的估值，并按所选计算依据更新投入与收益。定投仍会自动累计。
         </div>
       )}
     </FormShell>
