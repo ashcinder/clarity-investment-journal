@@ -700,8 +700,10 @@ export function scheduledDates(
 }
 
 export function planHoldingIds(plan: Plan): string[] {
-  return plan.allocations?.map((allocation) => allocation.holdingId) ??
-    (plan.holdingId ? [plan.holdingId] : []);
+  return (
+    plan.allocations?.map((allocation) => allocation.holdingId) ??
+    (plan.holdingId ? [plan.holdingId] : [])
+  );
 }
 
 export function planEntryKeys(plan: Plan, date: string): string[] {
@@ -709,11 +711,33 @@ export function planEntryKeys(plan: Plan, date: string): string[] {
   return plan.allocations?.map((_, index) => root + ":" + index) ?? [root];
 }
 
+export function planIsActive(state: Ledger, plan: Plan): boolean {
+  const account = state.accounts.find((item) => item.id === plan.accountId);
+  return Boolean(
+    account &&
+    !account.archived &&
+    !plan.paused &&
+    planHoldingIds(plan).every((id) => {
+      const holding = (state.holdings ?? []).find((item) => item.id === id);
+      return holding && !holding.archived;
+    }),
+  );
+}
+
+export function activePlans(state: Ledger): Plan[] {
+  return state.plans.filter((plan) => planIsActive(state, plan));
+}
+
 export function planCurrencyAllocations(
   plan: Plan,
 ): Array<{ holdingId?: string; amount: number }> {
   if (!plan.allocations)
-    return [{ ...(plan.holdingId ? { holdingId: plan.holdingId } : {}), amount: plan.amount }];
+    return [
+      {
+        ...(plan.holdingId ? { holdingId: plan.holdingId } : {}),
+        amount: plan.amount,
+      },
+    ];
   if (plan.allocationMode === "amounts")
     return plan.allocations.map((allocation) => ({
       holdingId: allocation.holdingId,
@@ -738,14 +762,7 @@ export function occurrences(
   return state.plans
     .flatMap((plan) => {
       const account = state.accounts.find((a) => a.id === plan.accountId);
-      if (
-        !account ||
-        account.archived ||
-        planHoldingIds(plan).some(
-          (id) => (state.holdings ?? []).find((h) => h.id === id)?.archived,
-        )
-      )
-        return [];
+      if (!account || !planIsActive(state, plan)) return [];
       return scheduledDates(plan, from, to, state.calendar).map((date) => {
         const key = plan.id + ":" + date;
         return {
@@ -1042,15 +1059,20 @@ export function validateLedger(input: unknown): Ledger {
       if (p.allocationMode === "amounts")
         assert(
           round(
-            p.allocations.reduce((sum, allocation) => sum + allocation.amount!, 0),
+            p.allocations.reduce(
+              (sum, allocation) => sum + allocation.amount!,
+              0,
+            ),
           ) === round(p.amount),
           "各资产定投金额之和必须等于计划总额",
         );
       else
         assert(
           Math.abs(
-            p.allocations.reduce((sum, allocation) => sum + allocation.ratio!, 0) -
-              100,
+            p.allocations.reduce(
+              (sum, allocation) => sum + allocation.ratio!,
+              0,
+            ) - 100,
           ) < 0.0001,
           "各资产定投占比合计必须为 100%",
         );
@@ -1064,8 +1086,8 @@ export function validateLedger(input: unknown): Ledger {
         "定投标的必须属于所选账户",
       );
     const a = s.accounts.find((a) => a.id === p.accountId)!;
-    const selectedHoldings = planHoldingIds(p).map(
-      (id) => (s.holdings ?? []).find((h) => h.id === id)!,
+    const selectedHoldings = planHoldingIds(p).map((id) =>
+      (s.holdings ?? []).find((h) => h.id === id)!,
     );
     const assetTypes = selectedHoldings.length
       ? selectedHoldings.map((h) => h.assetType ?? a.category)

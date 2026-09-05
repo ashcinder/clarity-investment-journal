@@ -42,8 +42,10 @@ import {
   Clock3,
   NotebookPen,
   SlidersHorizontal,
+  ScanLine,
 } from "lucide-react";
 import { prepareAccountImage } from "@/lib/account-image";
+import PortfolioOcrForm from "@/components/portfolio-ocr-form";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -72,6 +74,7 @@ import {
   addDays,
   range,
   accountStats,
+  activePlans,
   planAccountAmount,
   planAccountAllocations,
   planCurrencyAllocations,
@@ -141,6 +144,7 @@ type Modal =
   | { kind: "account"; account?: Account }
   | { kind: "holding"; accountId: string; holding?: Holding }
   | { kind: "holdingRoi"; holding: Holding }
+  | { kind: "portfolioOcr"; accountId: string }
   | { kind: "plan"; plan?: Plan }
   | { kind: "journal"; journal?: Journal }
   | { kind: "transfer" }
@@ -508,10 +512,13 @@ export default function InvestmentApp() {
         : [],
     [s, minute],
   );
-  const monthEvents = useMemo(() => {
-    const b = monthBounds(month);
-    return s ? occurrences(s, b.from, b.to) : [];
-  }, [s, month]);
+  // Derive the plan header and calendar from the latest saved ledger on every
+  // render so pause, resume and delete actions are reflected together.
+  const displayedMonth = monthBounds(month);
+  const monthEvents = s
+    ? occurrences(s, displayedMonth.from, displayedMonth.to)
+    : [];
+  const activePlanCount = s ? activePlans(s).length : 0;
   const detailAccount = s?.accounts.find((a) => a.id === detailId);
   const activeAccounts = s?.accounts.filter((a) => !a.archived) ?? [];
   const filteredEntries = useMemo(
@@ -1337,6 +1344,12 @@ export default function InvestmentApp() {
                 onAdd={() =>
                   setModal({ kind: "holding", accountId: detailAccount.id })
                 }
+                onScan={() =>
+                  setModal({
+                    kind: "portfolioOcr",
+                    accountId: detailAccount.id,
+                  })
+                }
                 onEdit={(h) =>
                   setModal({
                     kind: "holding",
@@ -1410,14 +1423,7 @@ export default function InvestmentApp() {
                   <div>
                     <small>进行中的计划</small>
                     <strong>
-                      {
-                        s.plans.filter(
-                          (p) =>
-                            !p.paused &&
-                            activeAccounts.some((a) => a.id === p.accountId),
-                        ).length
-                      }{" "}
-                      <span>项</span>
+                      {activePlanCount} <span>项</span>
                     </strong>
                   </div>
                   <div>
@@ -1817,12 +1823,13 @@ export default function InvestmentApp() {
                             onClick={() =>
                               void change(
                                 (s) => {
-                                  s.plans.find((x) => x.id === p.id)!.paused =
-                                    !p.paused;
-                                  if (p.paused)
-                                    s.plans.find(
-                                      (x) => x.id === p.id,
-                                    )!.autoFrom = today();
+                                  const target = s.plans.find(
+                                    (item) => item.id === p.id,
+                                  );
+                                  if (!target) throw Error("定投计划已被删除");
+                                  const resuming = target.paused;
+                                  target.paused = !target.paused;
+                                  if (resuming) target.autoFrom = today();
                                 },
                                 p.paused ? "定投已恢复" : "定投已暂停",
                               ).catch((e) => setNotice(errorText(e)))
@@ -2368,7 +2375,12 @@ export default function InvestmentApp() {
             if (!open && !busy) setModal(null);
           }}
         >
-          <DialogContent className="app-dialog">
+          <DialogContent
+            className={
+              "app-dialog" +
+              (modal.kind === "portfolioOcr" ? " ocr-dialog" : "")
+            }
+          >
             <DialogTitle>
               {modal.kind === "entry"
                 ? modal.entry
@@ -2398,7 +2410,9 @@ export default function InvestmentApp() {
                                 : "添加账户资产"
                               : modal.kind === "holdingRoi"
                                 ? "填写资产收益率"
-                                : modal.title}
+                                : modal.kind === "portfolioOcr"
+                                  ? "识别资产截图"
+                                  : modal.title}
             </DialogTitle>
             <DialogDescription>
               {modal.kind === "confirm"
@@ -2409,7 +2423,9 @@ export default function InvestmentApp() {
                     ? "仅支持同币种转账，两边同时入账，不增加组合总投入。"
                     : modal.kind === "calendar"
                       ? "按交易所公告填写整年的休市日期，周末会自动排除。"
-                      : "为你的长期记录，设置清晰的起点。"}
+                      : modal.kind === "portfolioOcr"
+                        ? "图片仅在浏览器本地识别。请核对结果后再批量更新账户资产。"
+                        : "为你的长期记录，设置清晰的起点。"}
             </DialogDescription>
             {modal.kind === "entry" && (
               <EntryForm
@@ -2612,6 +2628,116 @@ export default function InvestmentApp() {
                 }
               />
             )}
+            {modal.kind === "portfolioOcr" && (
+              <PortfolioOcrForm
+                state={s}
+                accountId={modal.accountId}
+                busy={busy}
+                onSubmit={(rows, screenshotCurrency, date, source) =>
+                  modalSubmit(() =>
+                    change((next) => {
+                      const account = next.accounts.find(
+                        (item) => item.id === modal.accountId,
+                      )!;
+                      const seen = new Set<string>();
+                      for (const row of rows.filter((item) => item.selected)) {
+                        if (row.holdingId && seen.has(row.holdingId))
+                          throw Error(
+                            "同一账本资产不能在一次识别结果中重复更新",
+                          );
+                        if (row.holdingId) seen.add(row.holdingId);
+                        const convertAmount = (value: number) =>
+                          convert(
+                            value,
+                            screenshotCurrency,
+                            account.currency,
+                            fxAt(next, date).rate,
+                          );
+                        const value = convertAmount(Number(row.currentValue));
+                        let holding = row.holdingId
+                          ? next.holdings?.find(
+                              (item) => item.id === row.holdingId,
+                            )
+                          : undefined;
+                        const isNew = !holding;
+                        if (!holding) {
+                          holding = {
+                            id: uid(),
+                            accountId: account.id,
+                            symbol: row.symbol.trim().toUpperCase(),
+                            name: row.symbol.trim().toUpperCase(),
+                            assetType: account.category,
+                            trackingMode: "amount",
+                            archived: false,
+                          };
+                          next.holdings ??= [];
+                          next.holdings.push(holding);
+                        }
+                        const previous = holdingStats(next, holding, date);
+                        const basisValue = Number(
+                          row.basis === "profit"
+                            ? row.profit
+                            : row.basis === "principal"
+                              ? row.invested
+                              : row.roi,
+                        );
+                        const profit =
+                          row.basis === "profit"
+                            ? convertAmount(basisValue)
+                            : row.basis === "principal"
+                              ? profitFromCurrentPrincipal(
+                                  value,
+                                  convertAmount(basisValue),
+                                  previous.withdrawn,
+                                )
+                              : null;
+                        const principal =
+                          row.basis === "roi"
+                            ? principalFromCurrentValue(
+                                value,
+                                basisValue,
+                                previous.withdrawn,
+                                previous.invested,
+                              )
+                            : principalFromCurrentProfit(
+                                value,
+                                profit!,
+                                previous.withdrawn,
+                              );
+                        if (isNew && principal > 0)
+                          next.entries.push(
+                            ...allocateHolding(
+                              next,
+                              holding,
+                              principal,
+                              source,
+                              date,
+                            ),
+                          );
+                        next.entries.push(
+                          row.basis === "roi"
+                            ? updateHoldingCurrentValue(
+                                next,
+                                holding,
+                                value,
+                                basisValue,
+                                undefined,
+                                date,
+                              )
+                            : updateHoldingCurrentProfit(
+                                next,
+                                holding,
+                                value,
+                                profit!,
+                                date,
+                              ),
+                        );
+                      }
+                    }, "截图资产已批量更新"),
+                  )
+                }
+              />
+            )}
             {modal.kind === "holdingRoi" && (
               <HoldingRoiForm
                 state={s}
@@ -2795,8 +2921,8 @@ function EntryForm({
     String(
       entry?.amount ??
         (occurrence
-          ? occurrenceAllocations[0]?.amount ??
-            planAccountAmount(state, occurrence.plan, occurrence.date)
+          ? (occurrenceAllocations[0]?.amount ??
+            planAccountAmount(state, occurrence.plan, occurrence.date))
           : ""),
     ),
   );
@@ -2937,41 +3063,49 @@ function EntryForm({
           disabled={locked}
         />
       )}
-      {!multiOccurrence && <Field label="记录类型">
-        <NativeSelect
-          value={kind}
-          disabled={locked}
-          onChange={(e) => {
-            const k = e.target.value as EntryKind;
-            setKind(k);
-            if (k === "valuation" && account)
-              setAmount(
-                String(
-                  accountStats(state, account, today(), holdingId || undefined)
-                    .value,
-                ),
-              );
-          }}
-        >
-          {Object.entries(kinds).map(([k, l]) => (
-            <option value={k} key={k}>
-              {l}
-            </option>
-          ))}
-        </NativeSelect>
-      </Field>}
-      {!multiOccurrence && <Field label={`金额（${account?.currency ?? "USD"}）`}>
-        <Input
-          type="number"
-          min={kind === "valuation" ? 0 : 0.00000001}
-          max={1e12}
-          step="any"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="0.00"
-          required
-        />
-      </Field>}
+      {!multiOccurrence && (
+        <Field label="记录类型">
+          <NativeSelect
+            value={kind}
+            disabled={locked}
+            onChange={(e) => {
+              const k = e.target.value as EntryKind;
+              setKind(k);
+              if (k === "valuation" && account)
+                setAmount(
+                  String(
+                    accountStats(
+                      state,
+                      account,
+                      today(),
+                      holdingId || undefined,
+                    ).value,
+                  ),
+                );
+            }}
+          >
+            {Object.entries(kinds).map(([k, l]) => (
+              <option value={k} key={k}>
+                {l}
+              </option>
+            ))}
+          </NativeSelect>
+        </Field>
+      )}
+      {!multiOccurrence && (
+        <Field label={`金额（${account?.currency ?? "USD"}）`}>
+          <Input
+            type="number"
+            min={kind === "valuation" ? 0 : 0.00000001}
+            max={1e12}
+            step="any"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            required
+          />
+        </Field>
+      )}
       <Field label="记账日期">
         <Input
           type="date"
@@ -3316,7 +3450,10 @@ function PlanForm({
             selected,
             amount: selected ? String(fixed?.amount ?? "") : "",
             ratio: selected
-              ? String(allocation?.ratio ?? (initialHoldingIds.length <= 1 ? 100 : ""))
+              ? String(
+                  allocation?.ratio ??
+                    (initialHoldingIds.length <= 1 ? 100 : ""),
+                )
               : "",
           },
         ];
@@ -3489,7 +3626,9 @@ function PlanForm({
       <Field label="定投对象" wide>
         <NativeSelect
           value={targetScope}
-          onChange={(e) => setTargetScope(e.target.value as "assets" | "account")}
+          onChange={(e) =>
+            setTargetScope(e.target.value as "assets" | "account")
+          }
         >
           {accountHoldings.length > 0 && (
             <option value="assets">选择一个或多个账户资产</option>
@@ -3544,7 +3683,9 @@ function PlanForm({
                 holdingMarket(holding) !== market;
               return (
                 <label
-                  className={"plan-target-row" + (incompatible ? " disabled" : "")}
+                  className={
+                    "plan-target-row" + (incompatible ? " disabled" : "")
+                  }
                   key={holding.id}
                 >
                   <span className="plan-target-name">
@@ -3567,7 +3708,13 @@ function PlanForm({
                     />
                     <span>
                       <b>{holding.symbol}</b>
-                      <small>{categories[holding.assetType ?? a?.category ?? "crypto"].label}</small>
+                      <small>
+                        {
+                          categories[
+                            holding.assetType ?? a?.category ?? "crypto"
+                          ].label
+                        }
+                      </small>
                     </span>
                   </span>
                   <Input
@@ -3578,8 +3725,8 @@ function PlanForm({
                     disabled={!selected}
                     value={
                       allocationMode === "amounts"
-                        ? targets[holding.id]?.amount ?? ""
-                        : targets[holding.id]?.ratio ?? ""
+                        ? (targets[holding.id]?.amount ?? "")
+                        : (targets[holding.id]?.ratio ?? "")
                     }
                     onChange={(e) =>
                       setTargets((current) => ({
@@ -3607,7 +3754,12 @@ function PlanForm({
               }
             >
               <span>
-                已选择 {selectedHoldings.length} 项 · {market === "CRYPTO" ? "Crypto 日历" : market === "CN" ? "中国市场日历" : "美国市场日历"}
+                已选择 {selectedHoldings.length} 项 ·{" "}
+                {market === "CRYPTO"
+                  ? "Crypto 日历"
+                  : market === "CN"
+                    ? "中国市场日历"
+                    : "美国市场日历"}
               </span>
               <strong>
                 {allocationMode === "amounts"
@@ -3662,7 +3814,10 @@ function PlanForm({
       </Field>
       {(freq === "weekly" || freq === "monthly") && (
         <Field label={freq === "monthly" ? "每月日期" : "每周日期"}>
-          <NativeSelect value={day} onChange={(e) => setDay(Number(e.target.value))}>
+          <NativeSelect
+            value={day}
+            onChange={(e) => setDay(Number(e.target.value))}
+          >
             {Array.from({ length: freq === "monthly" ? 31 : 7 }, (_, i) => (
               <option value={i + 1} key={i}>
                 {freq === "monthly"
@@ -3692,7 +3847,8 @@ function PlanForm({
       </Field>
       {a && planCurrency !== a.currency && (
         <div className="form-tip field-wide">
-          账户以 {a.currency} 记账，每次计划总额 {money(totalAmount, planCurrency)} 将按当日账本汇率换算。目前约为{" "}
+          账户以 {a.currency} 记账，每次计划总额{" "}
+          {money(totalAmount, planCurrency)} 将按当日账本汇率换算。目前约为{" "}
           {money(
             convert(totalAmount, planCurrency, a.currency, fxAt(state).rate),
             a.currency,
@@ -3705,7 +3861,8 @@ function PlanForm({
         {market === "CRYPTO"
           ? "Crypto 每天均可交易，包含周末与节假日。"
           : `${market === "CN" ? "中国" : "美国"}市场自动排除周末与已核验节假日。日计划休市跳过，周/月计划顺延。`}{" "}
-        每月 29–31 日遇短月份按月末安排。新计划从开始日期自动补记；修改计划从今天起生效，历史流水保持不变。
+        每月 29–31
+        日遇短月份按月末安排。新计划从开始日期自动补记；修改计划从今天起生效，历史流水保持不变。
       </div>
     </FormShell>
   );
@@ -4308,9 +4465,9 @@ function HoldingForm({
     holding?.assetType ?? account.category,
   );
   const [amount, setAmount] = useState(initial ? String(initial.value) : "");
-  const [returnMode, setReturnMode] = useState<
-    "principal" | "profit" | "rate"
-  >("principal");
+  const [returnMode, setReturnMode] = useState<"principal" | "profit" | "rate">(
+    "principal",
+  );
   const [principalAmount, setPrincipalAmount] = useState(
     initial ? String(initial.invested) : "",
   );
@@ -4435,9 +4592,7 @@ function HoldingForm({
         <NativeSelect
           value={returnMode}
           onChange={(e) =>
-            setReturnMode(
-              e.target.value as "principal" | "profit" | "rate",
-            )
+            setReturnMode(e.target.value as "principal" | "profit" | "rate")
           }
         >
           <option value="principal">填写总投入金额</option>
@@ -4542,10 +4697,10 @@ function HoldingForm({
             : returnMode === "profit"
               ? `反算收益率 ${calculatedRoi === null ? "—" : pct(calculatedRoi)} · 本金 = 当前金额${withdrawn > 0 ? " + 已取出" : ""} − 收益额`
               : Number(roi) === -100
-              ? "按填写的原始本金记录全部亏损"
-              : withdrawn > 0
-                ? `本金 =（当前金额 + 已取出 ${money(withdrawn, account.currency)}）÷（1 + 收益率）`
-                : "本金 = 当前金额 ÷（1 + 收益率）"}
+                ? "按填写的原始本金记录全部亏损"
+                : withdrawn > 0
+                  ? `本金 =（当前金额 + 已取出 ${money(withdrawn, account.currency)}）÷（1 + 收益率）`
+                  : "本金 = 当前金额 ÷（1 + 收益率）"}
         </small>
       </div>
       {holding && (
@@ -4634,6 +4789,7 @@ function AccountDetail({
   onBack,
   onEditAccount,
   onAdd,
+  onScan,
   onEdit,
   onDelete,
   onRecords,
@@ -4643,6 +4799,7 @@ function AccountDetail({
   onBack: () => void;
   onEditAccount: () => void;
   onAdd: () => void;
+  onScan: () => void;
   onEdit: (h: Holding) => void;
   onDelete: (h: Holding) => void;
   onRecords: () => void;
@@ -4696,14 +4853,24 @@ function AccountDetail({
             <h2>我的资产</h2>
             <p>填写当前金额和收益率，自动反算本金与收益。</p>
           </div>
-          <Button
-            className="primary-button"
-            onClick={onAdd}
-            disabled={account.archived}
-          >
-            <Plus size={15} />
-            添加资产
-          </Button>
+          <div className="row">
+            <Button
+              variant="outline"
+              onClick={onScan}
+              disabled={account.archived}
+            >
+              <ScanLine size={15} />
+              识别资产截图
+            </Button>
+            <Button
+              className="primary-button"
+              onClick={onAdd}
+              disabled={account.archived}
+            >
+              <Plus size={15} />
+              添加资产
+            </Button>
+          </div>
         </div>
         {positions.length ? (
           <div className="table-scroll">

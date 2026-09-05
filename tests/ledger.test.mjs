@@ -13,6 +13,7 @@ import {
   validateLedger,
   fxAt,
   validDate,
+  activePlans,
 } from '../shared/ledger.ts';
 const date = '2026-09-04';
 let id = 0;
@@ -212,6 +213,42 @@ test('paused plans and future starts never generate occurrences', () => {
       defaultCalendar,
     ).length,
     0,
+  );
+});
+test('plan dashboard data follows pause, resume and delete immediately', () => {
+  const state = seedLedger(date);
+  const planId = state.plans[0].id;
+  assert.ok(activePlans(state).some((item) => item.id === planId));
+  assert.ok(
+    occurrences(state, date, '2026-10-31').some(
+      (item) => item.plan.id === planId,
+    ),
+  );
+
+  state.plans.find((item) => item.id === planId).paused = true;
+  assert.equal(
+    activePlans(state).some((item) => item.id === planId),
+    false,
+  );
+  assert.equal(
+    occurrences(state, date, '2026-10-31').some(
+      (item) => item.plan.id === planId,
+    ),
+    false,
+  );
+
+  state.plans.find((item) => item.id === planId).paused = false;
+  assert.ok(activePlans(state).some((item) => item.id === planId));
+  state.plans = state.plans.filter((item) => item.id !== planId);
+  assert.equal(
+    activePlans(state).some((item) => item.id === planId),
+    false,
+  );
+  assert.equal(
+    occurrences(state, date, '2026-10-31').some(
+      (item) => item.plan.id === planId,
+    ),
+    false,
   );
 });
 test('all markets use Beijing time in summer and winter', () => {
