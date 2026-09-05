@@ -1,14 +1,12 @@
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "../chatgpt-auth";
 import { clearLedger, validateLedger } from "../../../shared/ledger";
+import { validMutationSource } from "../request-security";
 export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
-  if (
-    request.headers.get("origin") &&
-    request.headers.get("origin") !== new URL(request.url).origin
-  )
+  if (!validMutationSource(request))
     return Response.json({ error: "请求来源无效" }, { status: 403 });
   try {
     const body = (await request.json()) as {

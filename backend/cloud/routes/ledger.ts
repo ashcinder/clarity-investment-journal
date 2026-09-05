@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "../chatgpt-auth";
 import { seedLedger, validateLedger } from "../../../shared/ledger";
 import { materializeAutomatic } from "../../src/automation";
+import { validMutationSource } from "../request-security";
 export const dynamic = "force-dynamic";
 const reply = (data: unknown, status = 200) =>
   Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
@@ -56,8 +57,7 @@ export async function GET() {
 export async function PUT(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return reply({ error: "请先登录" }, 401);
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin)
+  if (!validMutationSource(request))
     return reply({ error: "请求来源无效" }, 403);
   try {
     const raw = await request.text();
