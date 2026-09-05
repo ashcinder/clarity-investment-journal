@@ -61,4 +61,4 @@ jobs:
             -i ~/.ssh/clarity_deploy \
             -o BatchMode=yes \
             "${VPS_USER}@${VPS_HOST}" \
-            "sudo mkdir -p '/opt/clarity/releases/${GITHUB_SHA}' && sudo tar -xzf '/tmp/clarity-${GITHUB_SHA}.tar.gz' -C '/opt/clarity/releases/${GITHUB_SHA}' && sudo bash '/opt/clarity/releases/${GITHUB_SHA}/backend/deploy/server-deploy.sh' '/opt/clarity/releases/${GITHUB_SHA}'"
+            "sudo mkdir -p '/opt/clarity/releases/${GITHUB_SHA}' && sudo tar -xzf '/tmp/clarity-${GITHUB_SHA}.tar.gz' -C '/opt/clarity/releases/${GITHUB_SHA}' && sudo bash '/opt/clarity/releases/${GITHUB_SHA}/backend/deploy/server-deploy.sh' '/opt/clarity/releases/${GITHUB_SHA}' '/tmp/clarity-${GITHUB_SHA}.tar.gz'"

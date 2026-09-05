@@ -2,6 +2,7 @@
 set -euo pipefail
 
 release_dir="${1:?缺少发布目录}"
+archive_path="${2:-}"
 shared_dir="/opt/clarity/shared"
 current_link="/opt/clarity/current"
 
@@ -27,6 +28,9 @@ docker compose up -d --remove-orphans
 for attempt in {1..30}; do
   if curl -fsS http://127.0.0.1:4318/api/health >/dev/null; then
     ln -sfn "$release_dir" "$current_link"
+    if [[ -n "$archive_path" && -f "$archive_path" ]]; then
+      rm -f "$archive_path"
+    fi
     echo "部署成功：$(basename "$release_dir")"
     exit 0
   fi
