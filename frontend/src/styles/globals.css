@@ -1164,19 +1164,24 @@ h1 > span {
   padding: 8px 0 15px;
 }
 .calendar-days {
-  gap: 5px;
+  gap: 7px;
 }
 .calendar-day {
   position: relative;
   min-height: 67px;
   padding: 10px 8px;
-  border: 1px solid transparent;
-  border-radius: 8px;
+  border: 1px solid #e5ecee;
+  border-radius: 9px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  background: #f7f9fa;
+  background: #f2f5f6;
   color: #4b626c;
+  box-shadow: 0 1px 2px rgb(23 47 58 / 4%);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 .calendar-day > span {
   font-size: 13px;
@@ -1198,18 +1203,23 @@ h1 > span {
   height: 4px;
 }
 .calendar-day.non-trading {
-  background: #fbfcfc;
+  background: #f8fafb;
+  border-color: #edf1f2;
   color: #aebbc0;
 }
 .calendar-day.today {
   background: #e5f0eb;
+  border-color: #b7d7cc;
   color: #237d68;
 }
 .calendar-day.picked {
   border-color: #6da994;
+  box-shadow: 0 0 0 1px #6da994;
 }
 .calendar-day:hover {
-  border-color: #b1cfc7;
+  background: #edf4f2;
+  border-color: #9fc6bb;
+  box-shadow: 0 2px 5px rgb(23 47 58 / 8%);
 }
 .day-check {
   position: absolute;
@@ -2215,7 +2225,7 @@ h1 > span {
     padding: 8px 5px;
   }
   .calendar-days {
-    gap: 4px;
+    gap: 5px;
   }
   .calendar-day small {
     font-size: 7px;
